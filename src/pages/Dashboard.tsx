@@ -438,7 +438,7 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
             onClick={() => showView(v)}
             className={clsx(
               'inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl font-bold',
-              view === v ? 'bg-ink text-white' : 'bg-slate-100 text-slate-700',
+              view === v ? 'bg-brand-700 text-white shadow-sm shadow-brand-700/25' : 'bg-slate-100 text-slate-700',
             )}
           >
             <Icon className="size-5" /> {t(key)}
@@ -550,7 +550,7 @@ function OrgHeading({ org, isAdmin }: { org: DashOrg | null; isAdmin: boolean })
   if (!org) {
     return (
       <div className="flex min-w-0 items-center gap-2">
-        <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-white">
+        <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-brand-500 to-brand-700 text-white shadow-sm">
           <ShieldCheck className="size-5" />
         </span>
         <div className="min-w-0">

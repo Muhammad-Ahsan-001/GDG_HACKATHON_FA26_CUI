@@ -200,7 +200,7 @@ const UserBubble = memo(function UserBubble({ msg, photos, onRemovePhoto, onRetr
       <div className="awaaz-bubble-in flex max-w-[88%] items-end gap-2 self-end">
         <div className="grid grid-cols-2 gap-1.5 rounded-3xl rounded-ee-md bg-brand-700 p-1.5 shadow-sm" style={{ gridTemplateColumns: shots.length === 1 ? '1fr' : undefined }}>
           {shots.map((p) => (
-            <div key={p.id} className="relative size-28 overflow-hidden rounded-2xl bg-brand-900">
+            <div key={p.id} className="relative size-28 overflow-hidden rounded-2xl bg-brand-100">
               <img src={p.url} alt={t('report.photoAlt')} className="size-full object-cover" decoding="async" />
               <button
                 type="button"

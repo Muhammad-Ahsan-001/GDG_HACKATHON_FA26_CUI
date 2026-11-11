@@ -24,7 +24,8 @@ export function useOnline(): boolean {
 }
 
 const FLASH_MS = 3200
-const PILL = 'pointer-events-auto inline-flex min-h-12 max-w-md items-center gap-2 rounded-full px-4 py-1.5 text-start text-sm font-bold text-white shadow-lg transition active:scale-[0.98]'
+const PILL_BASE = 'pointer-events-auto inline-flex min-h-12 max-w-md items-center gap-2 rounded-full px-4 py-1.5 text-start text-sm font-bold shadow-lg transition active:scale-[0.98]'
+const PILL = `${PILL_BASE} text-white`
 
 /**
  * Connectivity + offline-queue pill (top of the screen, app-wide):
@@ -91,12 +92,12 @@ export function OfflineBanner() {
         onClick={() => setExpanded((v) => !v)}
         title={t('pwa.offline')}
         aria-label={waiting > 0 ? `${t('pwa.offline')} ${waitingText}` : t('pwa.offline')}
-        className={clsx(PILL, 'bg-slate-800', expanded && 'rounded-2xl')}
+        className={clsx(PILL_BASE, 'bg-white text-slate-800 ring-1 ring-amber-200', expanded && 'rounded-2xl')}
       >
-        <WifiOff className="size-5 shrink-0" aria-hidden />
+        <WifiOff className="size-5 shrink-0 text-amber-600" aria-hidden />
         <span className="min-w-0">{label}</span>
         {waiting > 0 && !expanded && (
-          <span className="ms-1 inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-2.5 text-xs">
+          <span className="ms-1 inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-full bg-amber-50 px-2.5 text-xs text-amber-900 ring-1 ring-amber-200">
             <Inbox className="size-4" aria-hidden />
             <span className="font-latin tabular-nums">{waiting}</span>
           </span>

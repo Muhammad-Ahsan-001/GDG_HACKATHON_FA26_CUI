@@ -69,7 +69,7 @@ export function SosButton({ size = 64, className }: { size?: number; className?:
       {(hint || holding) && (
         <span
           role="status"
-          className="pointer-events-none absolute top-full z-10 mt-1.5 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white shadow-lg"
+          className="pointer-events-none absolute top-full z-10 mt-1.5 whitespace-nowrap rounded-full bg-white px-3 py-1 text-xs font-bold text-red-700 shadow-lg ring-1 ring-red-200"
         >
           {holding ? t('sos.keepHolding') : t('sos.tapHint')}
         </span>

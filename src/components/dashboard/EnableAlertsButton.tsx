@@ -64,7 +64,7 @@ export function EnableAlertsButton({ className }: { className?: string }) {
         on && 'bg-green-100 text-green-800',
         blocked && 'bg-slate-100 text-slate-600',
         state === 'error' && 'bg-red-50 text-red-700',
-        (state === 'idle' || state === 'busy') && 'bg-brand-700 text-white hover:bg-brand-900',
+        (state === 'idle' || state === 'busy') && 'bg-brand-700 text-white hover:bg-brand-600',
         className,
       )}
     >

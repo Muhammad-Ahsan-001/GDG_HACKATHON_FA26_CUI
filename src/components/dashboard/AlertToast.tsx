@@ -99,10 +99,10 @@ function Toast({ toast, onOpen, onDismiss }: { toast: ToastItem; onOpen: (id: st
       role={ok ? 'status' : 'alert'}
       className={clsx(
         'awaaz-dash-toast pointer-events-auto flex w-full max-w-lg items-center gap-2 rounded-2xl p-2 ps-3 shadow-xl',
-        ok ? 'bg-green-700 text-white' : 'bg-ink text-white',
+        ok ? 'bg-green-700 text-white' : 'bg-amber-50 text-amber-950 ring-1 ring-amber-300',
       )}
     >
-      <Icon className={clsx('size-6 shrink-0', !ok && 'text-amber-300')} />
+      <Icon className={clsx('size-6 shrink-0', !ok && 'text-amber-600')} />
       <span className="min-w-0 flex-1 font-semibold">{toast.message}</span>
       {close}
     </div>

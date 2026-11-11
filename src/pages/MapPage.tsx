@@ -367,7 +367,7 @@ export default function MapPage() {
 
       {(showEmpty || toast) && (
         <div className="pointer-events-none absolute inset-x-0 bottom-[calc(max(1.75rem,env(safe-area-inset-bottom)_+_0.75rem)_+_12.75rem)] z-20 flex justify-center px-4">
-          <div role="status" aria-live="polite" className="max-w-sm rounded-2xl bg-ink/90 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-lg">
+          <div role="status" aria-live="polite" className="max-w-sm rounded-2xl bg-white/95 px-4 py-2.5 text-center text-sm font-semibold text-ink shadow-lg ring-1 ring-brand-100 backdrop-blur">
             {toast ?? (allPins.length === 0 ? t('map.emptyHint') : t('map.noMatch'))}
           </div>
         </div>

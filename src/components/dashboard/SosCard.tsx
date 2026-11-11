@@ -212,7 +212,7 @@ function SosCardImpl({ a, live, selected, highlighted, pending, following, showO
               onClick={() => setEvidenceOpen((o) => !o)}
               className={clsx(
                 'inline-flex min-h-12 items-center justify-center gap-1.5 rounded-2xl px-2 text-sm font-bold transition active:scale-[0.98]',
-                evidenceOpen ? 'bg-slate-200 text-ink' : 'bg-ink text-white',
+                evidenceOpen ? 'bg-brand-50 text-brand-700 ring-1 ring-brand-100' : 'bg-brand-700 text-white',
               )}
             >
               <Headphones className="size-5 shrink-0" />

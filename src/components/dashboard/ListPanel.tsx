@@ -105,7 +105,7 @@ export function ListPanel(p: ListPanelProps) {
             onClick={() => p.onCategory('all')}
             label={t('dashboard.allCategories')}
             icon={LayoutGrid}
-            color="#0f172a"
+            color="#0f766e"
           />
           {presentCats.map((c) => {
             const m = CATEGORY_META[c]
@@ -142,7 +142,7 @@ export function ListPanel(p: ListPanelProps) {
         ) : p.error ? (
           <EmptyState icon={Inbox} title={t('dashboard.loadError')}>
             <button type="button" onClick={p.onRetry}
-              className="mt-2 min-h-12 rounded-2xl bg-brand-700 px-5 font-bold text-white hover:bg-brand-900">
+              className="mt-2 min-h-12 rounded-2xl bg-brand-700 px-5 font-bold text-white hover:bg-brand-600">
               {t('common.retry')}
             </button>
           </EmptyState>

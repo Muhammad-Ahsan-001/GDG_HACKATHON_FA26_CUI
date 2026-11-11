@@ -12,6 +12,8 @@
   --color-ink: #0f172a;
 }
 
+/* Light theme only: teal brand on white / slate-50 / soft teal tints; amber for voice. No dark surfaces. */
+:root { color-scheme: light; }
 html, body, #root { height: 100%; }
 body {
   margin: 0;

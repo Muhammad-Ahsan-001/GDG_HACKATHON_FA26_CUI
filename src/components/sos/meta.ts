@@ -33,7 +33,7 @@ export const THREAT_COLOR: Record<ThreatLevel, string> = {
   high: URGENCY_META.critical.color,
 }
 
-/** Ring colours on the dark SOS screen. */
+/** Ring colours on the (light) SOS screen. */
 export const SOS_RING = {
   listening: CATEGORY_META.safety.color,
   possible: URGENCY_META.high.color,

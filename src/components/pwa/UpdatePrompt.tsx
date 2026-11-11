@@ -18,20 +18,20 @@ export function UpdatePrompt() {
 
   if (!updateReady) return null
   return (
-    <div className="pointer-events-auto flex w-full max-w-md items-center gap-1 rounded-2xl bg-brand-900 p-1.5 text-white shadow-xl transition-[opacity,translate] duration-200 starting:-translate-y-3 starting:opacity-0 motion-reduce:transition-none">
+    <div className="pointer-events-auto flex w-full max-w-md items-center gap-1 rounded-2xl bg-linear-to-br from-white to-brand-50 p-1.5 text-ink shadow-xl ring-1 ring-brand-100 transition-[opacity,translate] duration-200 starting:-translate-y-3 starting:opacity-0 motion-reduce:transition-none">
       <button
         type="button"
         onClick={applyUpdate}
-        className="flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1 text-start active:bg-white/10"
+        className="flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1 text-start active:bg-brand-100/60"
       >
-        <span aria-hidden className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-white text-brand-700">
+        <span aria-hidden className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700">
           <RotateCw className="size-6" />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block font-bold leading-snug">{t('pwa.updateReady')}</span>
-          <span className="block text-sm leading-snug text-white/80">{t('pwa.updateBody')}</span>
+          <span className="block text-sm leading-snug text-slate-600">{t('pwa.updateBody')}</span>
         </span>
-        <span className="inline-flex min-h-11 shrink-0 items-center rounded-full bg-white px-4 text-sm font-bold text-brand-900">
+        <span className="inline-flex min-h-11 shrink-0 items-center rounded-full bg-brand-700 px-4 text-sm font-bold text-white shadow-sm">
           {t('pwa.updateNow')}
         </span>
       </button>
@@ -40,7 +40,7 @@ export function UpdatePrompt() {
         onClick={dismissUpdate}
         aria-label={t('pwa.dismiss')}
         title={t('pwa.dismiss')}
-        className="inline-flex size-12 shrink-0 items-center justify-center rounded-full text-white/80 hover:bg-white/10"
+        className="inline-flex size-12 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-brand-100/60"
       >
         <X className="size-5" />
       </button>

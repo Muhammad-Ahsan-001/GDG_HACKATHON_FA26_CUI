@@ -81,7 +81,7 @@ export function RoleCard({ role, selected, current, loading, disabled, onClick, 
         <span className="mt-0.5 block text-sm text-slate-600">{t(`auth.roleDesc_${role}`)}</span>
       </span>
       {current && (
-        <span className="absolute -top-2 end-3 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-semibold text-white">{t('auth.current')}</span>
+        <span className="absolute -top-2 end-3 rounded-full bg-brand-700 px-2 py-0.5 text-xs font-semibold text-white">{t('auth.current')}</span>
       )}
       {selected && (
         <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-white" style={{ background: m.color }}>

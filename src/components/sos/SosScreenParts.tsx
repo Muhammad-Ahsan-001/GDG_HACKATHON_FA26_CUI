@@ -1,4 +1,4 @@
-// Building blocks of the dark, silent SOS screen.
+// Building blocks of the light, silent SOS screen (the Disguise overlay alone stays black: it hides the screen).
 import clsx from 'clsx'
 import type { LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
@@ -44,7 +44,7 @@ export function ListeningRing({ color, icon: Icon, pulse, readLevel }: {
       <span className="absolute inset-4 rounded-full opacity-25 transition-colors duration-500" style={{ background: color }} />
       <span
         ref={inner}
-        className="absolute inset-9 flex items-center justify-center rounded-full text-white shadow-2xl transition-[transform,background-color] duration-100"
+        className="absolute inset-9 flex items-center justify-center rounded-full text-white shadow-2xl ring-8 ring-white transition-[transform,background-color] duration-100"
         style={{ background: color }}
       >
         <Icon className="size-16" />
@@ -84,10 +84,10 @@ export function HoldButton({ label, sub, icon: Icon, color, onDone, busy, disabl
       disabled={disabled}
       aria-label={`${label}. ${sub}`}
       className={clsx(
-        'relative flex min-h-16 w-full select-none items-center justify-center overflow-hidden rounded-3xl border-2 px-5 py-3 text-white',
+        'relative flex min-h-16 w-full select-none items-center justify-center overflow-hidden rounded-3xl border-2 bg-white px-5 py-3 shadow-sm transition-colors',
         '[touch-action:none] [-webkit-touch-callout:none] [-webkit-user-select:none] disabled:opacity-60',
       )}
-      style={{ borderColor: color }}
+      style={{ borderColor: color, color: holding ? '#fff' : color }}
     >
       <span
         aria-hidden
@@ -102,7 +102,7 @@ export function HoldButton({ label, sub, icon: Icon, color, onDone, busy, disabl
         {busy ? <Spinner className="size-7" /> : <Icon className="size-7 shrink-0" />}
         <span>
           <span className="block text-lg font-black leading-tight">{label}</span>
-          <span className="block text-sm font-semibold text-white/80">{holding || hint ? t('sos.keepHolding') : sub}</span>
+          <span className={clsx('block text-sm font-semibold', holding ? 'text-white/85' : 'text-slate-600')}>{holding || hint ? t('sos.keepHolding') : sub}</span>
         </span>
       </span>
     </button>

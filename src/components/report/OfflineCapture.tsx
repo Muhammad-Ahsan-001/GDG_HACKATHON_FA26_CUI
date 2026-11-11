@@ -82,7 +82,7 @@ export function OfflineCapture(p: {
         <section className={clsx('awaaz-bubble-in flex items-start gap-3 rounded-3xl p-3 ring-1',
           server ? 'bg-amber-50 text-amber-950 ring-amber-200' : 'bg-slate-100 text-slate-800 ring-slate-200')}>
           <span className={clsx('inline-flex size-11 shrink-0 items-center justify-center rounded-full text-white',
-            server ? 'bg-amber-600' : 'bg-slate-700')}>
+            server ? 'bg-amber-600' : 'bg-slate-500')}>
             <StatusIcon className="size-6" />
           </span>
           <div className="min-w-0 flex-1">

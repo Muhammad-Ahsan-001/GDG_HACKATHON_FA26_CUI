@@ -9,7 +9,7 @@ import type { Category, ReportStatus, Urgency } from '../../lib/types'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success'
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-brand-700 text-white hover:bg-brand-900 active:scale-[0.98]',
+  primary: 'bg-brand-700 text-white hover:bg-brand-600 active:scale-[0.98]',
   secondary: 'bg-white text-ink border border-slate-200 hover:bg-slate-50',
   ghost: 'bg-transparent text-ink hover:bg-slate-100',
   danger: 'bg-red-600 text-white hover:bg-red-700',

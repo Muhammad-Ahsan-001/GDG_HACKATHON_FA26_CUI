@@ -48,7 +48,7 @@
 .awz-pin-count {
   position: absolute; top: -6px; inset-inline-end: -8px;
   min-width: 20px; height: 20px; padding: 0 5px;
-  border-radius: 9999px; background: #0f172a; color: #fff;
+  border-radius: 9999px; background: #0f766e; color: #fff;
   font: 700 11px/20px Inter, sans-serif; text-align: center;
   border: 2px solid #fff;
 }

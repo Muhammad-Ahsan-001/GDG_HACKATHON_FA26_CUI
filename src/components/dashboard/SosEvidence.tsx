@@ -92,7 +92,7 @@ export function SosEvidence({ sessionId, refreshKey }: { sessionId: string; refr
           <button
             type="button"
             onClick={() => void playAll()}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-ink px-3 text-sm font-bold text-white"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-brand-700 px-3 text-sm font-bold text-white"
           >
             {anyPlaying ? <Square className="size-4" /> : <ListMusic className="size-4" />}
             {anyPlaying ? t('dashboard.sosStop') : t('dashboard.sosPlayAll')}
@@ -137,7 +137,7 @@ export function SosEvidence({ sessionId, refreshKey }: { sessionId: string; refr
                   title={on ? t('dashboard.sosStop') : t('dashboard.sosPlayClip', { n: c.seq + 1 })}
                   className={clsx(
                     'inline-flex size-12 shrink-0 items-center justify-center rounded-full text-white transition active:scale-95',
-                    on ? 'bg-red-600' : 'bg-ink',
+                    on ? 'bg-red-600' : 'bg-brand-700',
                   )}
                 >
                   {on ? <Square className="size-5" /> : <CirclePlay className="size-6" />}

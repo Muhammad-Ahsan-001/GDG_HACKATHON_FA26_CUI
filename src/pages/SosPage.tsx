@@ -1,4 +1,4 @@
-// /sos — women's safety SOS mode (docs/CONTRACT-1B.md §SOS). Full screen, dark, SILENT (vibration only):
+// /sos — women's safety SOS mode (docs/CONTRACT-1B.md §SOS). Full screen, light (white / rose wash, red accents), SILENT (vibration only):
 // listens in self-contained chunks, the server's AI checks each chunk for threats and alerts nearby police
 // with the live location. "Send alert now" escalates by hand (works without the mic).
 import clsx from 'clsx'
@@ -15,6 +15,7 @@ import { AiLabel, Spinner } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
 import { useI18n } from '../lib/i18n'
 import { newClientId } from '../lib/media'
+import { USER_URGENCY_META } from '../lib/attributes'
 import { STATUS_META } from '../lib/status'
 
 /** Ignore taps on "Send alert now" right after the screen opens (the finger that held the SOS button). */
@@ -100,21 +101,21 @@ export default function SosPage() {
   const BackIcon = dir === 'rtl' ? ArrowRight : ArrowLeft
 
   return (
-    <div className="fixed inset-0 z-[80] overflow-y-auto bg-slate-950 text-white">
+    <div className="fixed inset-0 z-[80] overflow-y-auto bg-linear-to-b from-rose-50 via-white to-white text-slate-900">
       <div className="mx-auto flex min-h-full max-w-md flex-col px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))]">
         {/* top bar */}
         <header className="flex items-center gap-2">
-          <span className="font-latin inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-black" style={{ background: SOS_RED }}>
+          <span className="font-latin inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-black text-white shadow-sm shadow-red-600/30" style={{ background: SOS_RED }}>
             <Siren className="size-4" /> {t('sos.sos')}
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-semibold" title={t('sos.privateLong')}>
+          <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200" title={t('sos.privateLong')}>
             <Lock className="size-3.5" /> {t('sos.private')}
           </span>
-          <Elapsed since={s.startedAt} className="ms-auto text-lg font-bold text-white/90" />
+          <Elapsed since={s.startedAt} className="ms-auto text-lg font-bold text-red-700" />
           {kind !== 'ended' && (
             <button
               type="button" onClick={disguise} title={t('sos.disguiseHint')}
-              className="inline-flex min-h-12 items-center gap-2 rounded-full bg-white/10 px-4 font-semibold active:bg-white/20"
+              className="inline-flex min-h-12 items-center gap-2 rounded-full bg-white px-4 font-semibold text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 active:bg-slate-100"
             >
               <EyeOff className="size-5" /> {t('sos.disguise')}
             </button>
@@ -126,17 +127,17 @@ export default function SosPage() {
           <ListeningRing color={ringColor} icon={RingIcon} pulse={micOk || alerted} readLevel={micOk ? s.readLevel : undefined} />
           <h1 className="text-2xl font-black leading-snug">{title}</h1>
           {(kind === 'threat' || kind === 'possible') && <AiLabel />}
-          {kind === 'listening' && <p className="max-w-xs text-sm text-white/70">{t('sos.listeningSub')}</p>}
-          {alerted && <p className="max-w-xs font-semibold text-white/90">{orgLine}</p>}
+          {kind === 'listening' && <p className="max-w-xs text-sm text-slate-600">{t('sos.listeningSub')}</p>}
+          {alerted && <p className="max-w-xs font-semibold text-slate-800">{orgLine}</p>}
           {(kind === 'possible' || kind === 'threat') && reasonText && (
-            <p className="max-w-xs text-sm text-white/70">{reasonText}</p>
+            <p className="max-w-xs text-sm text-slate-600">{reasonText}</p>
           )}
           {kind === 'micOff' && (
             <div className="max-w-xs space-y-3">
-              <p className="text-sm text-white/75">{t('sos.micOffBody')}</p>
+              <p className="text-sm text-slate-600">{t('sos.micOffBody')}</p>
               {s.mic !== 'unsupported' && (
                 <button type="button" onClick={s.retryMic}
-                  className="inline-flex min-h-12 items-center gap-2 rounded-full bg-white/15 px-5 font-bold active:bg-white/25">
+                  className="inline-flex min-h-12 items-center gap-2 rounded-full bg-white px-5 font-bold text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50 active:bg-slate-100">
                   <Mic className="size-5" /> {t('sos.micRetry')}
                 </button>
               )}
@@ -146,7 +147,7 @@ export default function SosPage() {
 
         {kind === 'ended' ? (
           <button type="button" onClick={goBack}
-            className="flex min-h-16 w-full items-center justify-center gap-3 rounded-3xl bg-white/10 text-lg font-bold active:bg-white/20">
+            className="flex min-h-16 w-full items-center justify-center gap-3 rounded-3xl bg-white text-lg font-bold text-slate-800 shadow-md ring-1 ring-slate-200 hover:bg-slate-50 active:bg-slate-100">
             <BackIcon className="size-6" /> {t('sos.back')}
           </button>
         ) : (
@@ -154,34 +155,34 @@ export default function SosPage() {
             {/* live facts */}
             <div className="flex flex-wrap justify-center gap-2 text-sm">
               {s.geo.state === 'ok' ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5">
-                  <MapPin className="size-4" /> {t('sos.locationOn', { m: s.geo.accuracy ?? 0 })}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-slate-700 shadow-sm ring-1 ring-slate-200">
+                  <MapPin className="size-4 text-green-700" /> {t('sos.locationOn', { m: s.geo.accuracy ?? 0 })}
                 </span>
               ) : s.geo.state === 'locating' ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-white/80">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-slate-600 shadow-sm ring-1 ring-slate-200">
                   <MapPin className="size-4 animate-pulse" /> {t('sos.locationWait')}
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-3 py-1.5 text-amber-200">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-amber-800 ring-1 ring-amber-200">
                   <MapPinOff className="size-4" /> {t('sos.locationOff')}
                 </span>
               )}
               {s.netIssue ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-3 py-1.5 text-amber-200">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-amber-800 ring-1 ring-amber-200">
                   <WifiOff className="size-4" /> {t('sos.weakNet')}
                 </span>
               ) : micOk ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 text-slate-700 shadow-sm ring-1 ring-slate-200">
                   <CloudUpload className="size-4" /> {s.sent ? t('sos.clipsSent', { n: s.sent }) : t('sos.clipsNone')}
                 </span>
               ) : null}
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-white/60">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-slate-600">
                 <TriggerIcon className="size-4" /> {t('sos.startedBy', { how: t(`sos.trigger_${trigger}`) })}
               </span>
             </div>
 
             {s.startTrouble && !alerted && (
-              <div role="alert" className="mt-3 flex items-start gap-2 rounded-2xl bg-amber-500/15 p-3 text-sm text-amber-100">
+              <div role="alert" className="mt-3 flex items-start gap-2 rounded-2xl bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
                 <WifiOff className="mt-0.5 size-5 shrink-0" /> {t('sos.startTrouble')}
               </div>
             )}
@@ -191,7 +192,7 @@ export default function SosPage() {
               {!alerted ? (
                 <button
                   type="button" onClick={onAlert} disabled={s.alertSend === 'sending' || s.alertSend === 'retrying' || s.finished}
-                  className="flex min-h-24 w-full items-center justify-center gap-4 rounded-3xl px-5 py-4 text-start shadow-2xl ring-4 ring-white/10 transition active:scale-[0.98] disabled:opacity-90"
+                  className="flex min-h-24 w-full items-center justify-center gap-4 rounded-3xl px-5 py-4 text-start text-white shadow-2xl shadow-red-600/30 ring-4 ring-red-200 transition active:scale-[0.98] disabled:opacity-90"
                   style={{ background: SOS_RED }}
                 >
                   {s.alertSend === 'sending' || s.alertSend === 'retrying'
@@ -207,13 +208,13 @@ export default function SosPage() {
                   </span>
                 </button>
               ) : (
-                <div className="flex items-center gap-3 rounded-3xl p-4 ring-2" style={{ background: `${SOS_RED}33`, ['--tw-ring-color' as string]: SOS_RED }}>
+                <div className="flex items-center gap-3 rounded-3xl p-4 ring-2" style={{ background: USER_URGENCY_META.emergency.soft, ['--tw-ring-color' as string]: SOS_RED }}>
                   <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-full text-white" style={{ background: SOS_RED }}>
                     <ShieldCheck className="size-7" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block text-lg font-black leading-tight">{kind === 'threat' ? t('sos.threatAlerted') : t('sos.manualAlerted')}</span>
-                    <span className="block text-sm text-white/85">{orgLine}</span>
+                    <span className="block text-lg font-black leading-tight text-red-800">{kind === 'threat' ? t('sos.threatAlerted') : t('sos.manualAlerted')}</span>
+                    <span className="block text-sm text-slate-700">{orgLine}</span>
                   </span>
                 </div>
               )}
@@ -222,7 +223,7 @@ export default function SosPage() {
                 href={POLICE_TEL}
                 className={clsx(
                   'flex min-h-14 w-full items-center justify-center gap-2 rounded-3xl font-bold transition active:scale-[0.98]',
-                  urgentCall ? 'bg-white text-red-700' : 'bg-white/10 text-white',
+                  urgentCall ? 'bg-red-600 text-white shadow-lg shadow-red-600/30' : 'bg-white text-red-700 shadow-sm ring-1 ring-red-200 hover:bg-red-50',
                 )}
               >
                 <Phone className="size-5" /> {t('sos.callPolice')}
@@ -234,7 +235,7 @@ export default function SosPage() {
               />
             </div>
 
-            <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-white/55">
+            <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-slate-500">
               <Info className="mt-0.5 size-4 shrink-0" /> <span>{t('sos.limitNote')}</span>
             </p>
           </>

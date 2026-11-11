@@ -69,7 +69,7 @@ export function CoachMark({ onDismiss, autoPlay }: {
         // physical left/translate centring is direction-agnostic
         className="pointer-events-none absolute bottom-[calc(100%+0.75rem)] left-1/2 flex w-[min(17rem,calc(100vw-2rem))] -translate-x-1/2 flex-col items-center"
       >
-        <div className="pointer-events-auto flex w-full items-center gap-2 rounded-2xl bg-ink p-2 pe-3 text-white shadow-2xl">
+        <div className="pointer-events-auto flex w-full items-center gap-2 rounded-2xl bg-linear-to-br from-white to-amber-50 p-2 pe-3 text-ink shadow-[0_12px_32px_-8px_rgba(180,83,9,0.35)] ring-1 ring-amber-200">
           <button
             type="button"
             data-awaaz-coach-keep=""

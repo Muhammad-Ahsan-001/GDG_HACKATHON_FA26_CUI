@@ -172,7 +172,7 @@ function MicButton({ rec, disabled, onClick }: { rec: Recorder; disabled: boolea
         aria-label={recording ? t('report.stopRecording') : t('report.startRecording')}
         className={clsx(
           'relative z-10 inline-flex size-[78px] select-none items-center justify-center rounded-full text-white shadow-xl transition active:scale-95',
-          recording ? 'bg-red-600' : disabled ? 'bg-slate-300 shadow-none' : 'bg-brand-700 hover:bg-brand-900',
+          recording ? 'bg-red-600' : disabled ? 'bg-slate-300 shadow-none' : 'bg-brand-700 hover:bg-brand-600',
         )}
       >
         {recording ? (

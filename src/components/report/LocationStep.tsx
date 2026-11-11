@@ -105,7 +105,7 @@ export function LocationStep({ initial, userLocation, hints, problem, onUse, onB
         <button
           type="submit"
           disabled={searching || query.trim().length < 2}
-          className="inline-flex min-h-14 shrink-0 items-center justify-center gap-1.5 rounded-2xl bg-slate-800 px-4 font-bold text-white active:scale-[0.98] disabled:bg-slate-300"
+          className="inline-flex min-h-14 shrink-0 items-center justify-center gap-1.5 rounded-2xl bg-brand-700 px-4 font-bold text-white shadow-sm hover:bg-brand-600 active:scale-[0.98] disabled:bg-slate-300 disabled:shadow-none"
         >
           {searching ? <Loader2 className="size-5 animate-spin" /> : <Search className="size-5" />}
           <span className="hidden min-[400px]:inline">{t('report.search')}</span>

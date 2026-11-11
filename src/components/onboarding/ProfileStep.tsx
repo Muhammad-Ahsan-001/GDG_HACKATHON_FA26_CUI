@@ -277,7 +277,7 @@ export function ProfileStep({ phone, initialDraft, onSaved }: {
           <div className="divide-y divide-slate-100">
             <InfoRow icon={UserRound} color="bg-brand-700" label={t('onboarding.nameLabel')} value={draft.display_name} missing={t('onboarding.notHeard')} />
             <InfoRow icon={MapPin} color="bg-sky-600" label={t('onboarding.areaLabel')} value={draft.home_area} missing={t('onboarding.notHeard')} />
-            <InfoRow icon={Languages} color="bg-slate-700" label={t('onboarding.languageLabel')}
+            <InfoRow icon={Languages} color="bg-violet-600" label={t('onboarding.languageLabel')}
               value={<span lang={draft.language} className={draft.language === 'ur' ? 'font-urdu' : 'font-latin'}>{LANG_LABEL[draft.language]}</span>}
               action={
                 <button type="button" onClick={() => setDraft({ ...draft, language: otherLang })} disabled={saving}

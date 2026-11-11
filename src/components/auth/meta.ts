@@ -13,7 +13,7 @@ export const ROLE_META: Record<Role, RoleMeta> = {
   citizen:   { icon: Megaphone,   color: '#0F766E', soft: '#CCFBF1' },
   ngo:       { icon: HandHeart,   color: '#BE185D', soft: '#FCE7F3' },
   responder: { icon: Siren,       color: '#C2410C', soft: '#FFEDD5' },
-  admin:     { icon: ShieldCheck, color: '#334155', soft: '#E2E8F0' },
+  admin:     { icon: ShieldCheck, color: '#6D28D9', soft: '#EDE9FE' },
 }
 
 export const SIGNUP_ROLES: Exclude<Role, 'admin'>[] = ['citizen', 'ngo', 'responder']

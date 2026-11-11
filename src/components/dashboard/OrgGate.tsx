@@ -17,7 +17,7 @@ export function NoOrgCta() {
       <p className="text-slate-600">{t('dashboard.noOrgBody')}</p>
       <Link
         to="/org/register"
-        className="inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-brand-700 px-6 text-lg font-bold text-white hover:bg-brand-900 active:scale-[0.98]"
+        className="inline-flex min-h-14 items-center justify-center gap-2 rounded-2xl bg-brand-700 px-6 text-lg font-bold text-white hover:bg-brand-600 active:scale-[0.98]"
       >
         <Plus className="size-6" /> {t('dashboard.registerOrg')}
       </Link>
