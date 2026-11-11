@@ -6,6 +6,8 @@ import report from './report'
 import auth from './auth'
 import dashboard from './dashboard'
 import pwa from './pwa'
+import sos from './sos'
+import onboarding from './onboarding'
 
 /**
  * i18n: one namespace file per area, each `export default { en: {...}, ur: {...} } satisfies Namespace`.
@@ -13,7 +15,7 @@ import pwa from './pwa'
  * Builders add keys ONLY to their own namespace file.
  */
 export type Namespace = { en: Record<string, string>; ur: Record<string, string> }
-const NAMESPACES: Record<string, Namespace> = { common, map, report, auth, dashboard, pwa }
+const NAMESPACES: Record<string, Namespace> = { common, map, report, auth, dashboard, pwa, sos, onboarding }
 
 const STORAGE_KEY = 'awaaz.lang'
 

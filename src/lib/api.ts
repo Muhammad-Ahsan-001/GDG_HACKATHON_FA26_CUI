@@ -1,5 +1,15 @@
 // Typed wrappers for every Edge Function + RPC. Pages/components call these, never fetch directly.
 import { supabase } from './supabase'
+import type { ReportChatRequest, ReportChatResponse } from './attributes'
+import type { SosRequest, SosResponse } from './sos'
+
+export interface VoiceProfileResponse {
+  transcript: string
+  no_speech: boolean
+  profile: { display_name: string | null; home_area: string | null; language: Lang | null }
+  confirm: { en: string; ur: string }
+  confirm_audio_url?: string
+}
 import type {
   AssignmentActionResponse, Category, DigestResponse, Lang, OrgType, ProcessReportRequest,
   ProcessReportResponse, Role, VoteResponse, VoteType,
@@ -35,6 +45,19 @@ export async function callFunction<T>(name: string, body: unknown): Promise<T> {
 }
 
 export const api = {
+  // ---- Phase 1b: AI intake conversation, voice onboarding, SOS ----
+  reportChat: (req: ReportChatRequest) => callFunction<ReportChatResponse>('report-chat', req),
+  voiceProfile: (req: { audio_path?: string; text?: string; ui_language: Lang }) =>
+    callFunction<VoiceProfileResponse>('voice-profile', req),
+  async completeOnboarding(input: { display_name: string; home_area: string; language: Lang; phone?: string | null }) {
+    const { data, error } = await supabase.rpc('complete_onboarding', {
+      p_display_name: input.display_name, p_home_area: input.home_area, p_language: input.language, p_phone: input.phone ?? null,
+    })
+    if (error) throw error
+    return data
+  },
+  sos: (req: SosRequest) => callFunction<SosResponse>('sos', req),
+
   processReport: (req: ProcessReportRequest) => callFunction<ProcessReportResponse>('process-report', req),
   vote: (cluster_id: string, vote: VoteType) => callFunction<VoteResponse>('vote', { cluster_id, vote }),
   assignmentAction: (assignment_id: string, action: 'claim' | 'start' | 'resolve', note?: string) =>

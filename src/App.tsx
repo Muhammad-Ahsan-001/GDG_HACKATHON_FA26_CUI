@@ -14,6 +14,7 @@ const MePage = lazy(() => import('./pages/MePage'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const OrgRegister = lazy(() => import('./pages/OrgRegister'))
 const Admin = lazy(() => import('./pages/Admin'))
+const SosPage = lazy(() => import('./pages/SosPage'))
 
 function FullScreenSpinner() {
   return <div className="flex h-full items-center justify-center text-brand-700"><Spinner className="size-10" /></div>
@@ -48,6 +49,8 @@ export default function App() {
               <Route path="/me" element={<RequireAuth><MePage /></RequireAuth>} />
               <Route path="/dashboard" element={<RequireAuth roles={['ngo', 'responder', 'admin']}><Dashboard /></RequireAuth>} />
               <Route path="/org/register" element={<RequireAuth roles={['ngo', 'responder']}><OrgRegister /></RequireAuth>} />
+              {/* SOS (women's safety): discreet listening + threat detection -> police alert */}
+              <Route path="/sos" element={<RequireAuth><SosPage /></RequireAuth>} />
               <Route path="/admin" element={<RequireAuth roles={['admin']}><Admin /></RequireAuth>} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

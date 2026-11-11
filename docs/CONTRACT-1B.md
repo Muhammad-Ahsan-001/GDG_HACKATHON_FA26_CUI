@@ -99,3 +99,68 @@ gain `attributes: AttributeMap | null` and `user_urgency: UserUrgency | null`; `
   map (mapIntro, first visit), pin sheet (pinVerify), errors (noSpeech/tooShort/micDenied/needLocation/offlineQueued/tryAgain).
 - **Attributes displayed**: PinSheet (full chips + user urgency badge), dashboard AssignmentCard (compact chips, max 5,
   danger first), MePage report cards (compact).
+
+## SOS — women's safety (user requirement 2026-11-11)
+Normal reporting stays as is. SOS is a separate, very specific emergency mode that opens the mic, listens discreetly,
+and — when the AI hears a threat ("I'll kill you", "maar dunga", "jaan se maar doon ga", "chhor do mujhe", "bachao",
+"help me", kidnapping / coercion / assault language, pleading, screaming markers) — sends an URGENT alert to nearby police
+with live location, and logs it in the user's app.
+**SOS is silent**: never play voice prompts or sounds in SOS mode (it could alert an attacker) — vibration only.
+**SOS is private**: never on the public map.
+
+### Triggers (frontend)
+- Red SOS button: on MapPage (top, start side) and MePage. Press-and-hold 1.5 s with a filling ring (prevents accidents) →
+  navigate('/sos?trigger=button').
+- Hardware volume buttons (best effort): a global listener (mounted app-wide) for keydown `AudioVolumeUp`/`AudioVolumeDown`
+  (also legacy `VolumeUp`/`VolumeDown`, keyCodes 174/175/182/183): 3 presses within 2.5 s → '/sos?trigger=volume'.
+  LIMITATION (say it in the UI help + README): browsers deliver volume keys only on some Android devices and only while the
+  app is open in the foreground; screen-off/background triggering needs a native wrapper (TWA + Android service) — future work.
+- Shake: opt-in toggle in MePage ("shake phone 3 times for SOS"), DeviceMotion, 3 strong shakes in 2 s (iOS needs
+  DeviceMotionEvent.requestPermission on a tap) → '/sos?trigger=shake'.
+- App-icon shortcut "SOS" in the web manifest → '/sos?trigger=shortcut'.
+- Settings are per-device (localStorage, try/catch).
+
+### SOS screen (`/sos`, RequireAuth — anonymous OK)
+Full screen, dark. Starts immediately: `sos` start → mic recording in self-contained `SOS_CHUNK_SECONDS` (8 s) chunks
+(restart MediaRecorder per chunk so each file decodes on its own) → upload `report-audio/<uid>/sos/<session_id>/<seq>.webm`
+→ `sos` chunk. High-accuracy location watch → `sos` location every ≥ 15 s or ≥ 25 m moved. UI: pulsing "Listening" ring,
+timer, status line (Listening… / Police alerted ✓ with org name), huge "Send alert now" (manual escalation, no AI needed),
+"I'm safe" (end, outcome safe; confirm with hold), "Disguise" toggle that blacks out the screen (tap 3× to undo).
+Wake Lock API while active. If mic is denied → still allow "Send alert now" with location.
+
+### `sos` Edge Function — POST, requireUser, body = `SosRequest`, response = `SosResponse` (src/lib/sos.ts)
+- start: insert sos_sessions (id = client session_id, idempotent), status 'monitoring'.
+- chunk: path must start with `<uid>/sos/<session_id>/`; transcribe (silence ⇒ no_speech, skip AI); append to
+  sos_sessions.transcript; `threatCheck` (new module `_shared/threat.ts`, OpenAI MODELS.reason, strict JSON
+  {threat_level: none|possible|high, phrases[], reason_en, reason_ur}) over the last ~3 chunks; plus a deterministic keyword
+  list (Urdu script, Roman Urdu, English) that forces 'high'. On 'high' (first time) → escalate.
+- alert: manual escalate (reason "User pressed Send alert").
+- escalate = create PRIVATE cluster + report (category 'safety', urgency 'critical', is_private true, user_urgency 'emergency',
+  status 'unconfirmed', title "SOS — possible threat"/"ایس او ایس — ممکنہ خطرہ", summary from reason + key phrases, attributes
+  {threat_phrases, trigger, live_location}), set clusters.sos_session_id, then route ONLY to police orgs (find_responders
+  with p_category 'safety', ignore verification), notifications type 'sos_alert' (police owners) + FCM push (urgent wording,
+  link /dashboard), session status 'alerted', alerted_at, cluster_id; user notification type 'sos_logged'.
+- location: update sos_sessions.last_location(_at) and, if alerted, the cluster centroid + report location (police map follows).
+- end: status 'safe' | 'cancelled', ended_at; if alerted, notify police "User marked themselves safe" (assignment stays for
+  police to resolve).
+- evidence: police owner of an assigned org (or admin) → signed URLs (1 h) for the session's chunks + transcripts.
+Latency target per chunk < 5 s. Never throws to the client for AI failures — keyword check still runs.
+
+### DB (Phase-1b DB builder, same migration as intake)
+- `sos_sessions(id uuid pk, user_id uuid -> profiles, trigger text, status text check in (monitoring, alerted, safe,
+  cancelled, resolved) default 'monitoring', started_at, ended_at, alerted_at, last_location geography(Point), last_location_at,
+  threat_level text default 'none', threat_reason text, transcript text, cluster_id uuid -> clusters, created_at, updated_at)`
+- `sos_chunks(id uuid pk, session_id uuid -> sos_sessions on delete cascade, seq int, audio_path text, transcript text,
+  threat_level text, created_at, unique(session_id, seq))`
+- RLS: owner selects own sessions/chunks; org owners of an org with an assignment on the session's cluster select them;
+  admin all; writes only by service role. Realtime: add sos_sessions (owner sees status change live, police see location).
+  View `my_sos_sessions` not needed — select sos_sessions directly with lat/lng exposed via a view `sos_sessions_view`
+  (id, user_id, trigger, status, started_at, ended_at, alerted_at, threat_level, threat_reason, transcript, cluster_id, lat, lng)
+  with security_invoker = true so RLS applies.
+- `clusters.is_private boolean not null default false`, `clusters.sos_session_id uuid`, `reports.is_private boolean not null default false`.
+  map_pins + public_reports EXCLUDE is_private; match_cluster EXCLUDES private reports; my_assignments INCLUDES `is_private`,
+  `sos_session_id` (police dashboard shows SOS alerts pinned at the top in red with live location + "Play evidence").
+
+### Also fix in process-report (Phase-1b DB/pipeline builder)
+Food servings: when the reporter states a number (text/transcript/attributes), prefer it over the photo estimate; use the
+photo estimate only when none was stated.
