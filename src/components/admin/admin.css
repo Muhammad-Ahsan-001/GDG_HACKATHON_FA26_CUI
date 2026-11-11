@@ -1,0 +1,53 @@
+/* Admin operations console. Layout is Tailwind; this file only holds what utilities can't express nicely. */
+.adm-root {
+  --adm-side: #0b1f1d;
+  --adm-side-2: #10302c;
+  --adm-line: rgb(226 232 240 / 0.9);
+  --adm-ink-2: #475569;
+  --adm-ink-3: #64748b;
+}
+
+/* skeleton shimmer (static when reduced motion is preferred) */
+.adm-skel {
+  background: linear-gradient(90deg, #eef2f6 0%, #f8fafc 40%, #eef2f6 80%);
+  background-size: 200% 100%;
+  animation: adm-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes adm-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+/* live dot */
+.adm-live-dot { position: relative; display: inline-flex; width: 8px; height: 8px; border-radius: 9999px; background: currentColor; }
+.adm-live-dot::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; background: currentColor;
+  animation: adm-ping 1.6s cubic-bezier(0, 0, .2, 1) infinite;
+}
+@keyframes adm-ping { 75%, 100% { transform: scale(2.6); opacity: 0; } }
+
+/* subtle highlight of a row/card that just changed via realtime */
+.adm-flash { animation: adm-flash 1.6s ease-out 1; }
+@keyframes adm-flash { from { box-shadow: 0 0 0 3px rgb(20 184 166 / .45); } to { box-shadow: 0 0 0 3px rgb(20 184 166 / 0); } }
+
+/* thin, quiet scrollbars inside panels */
+.adm-scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+.adm-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.adm-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+.adm-side-scroll { scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / .15) transparent; }
+
+/* range input: trust slider */
+.adm-range { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 9999px; background: linear-gradient(to right, var(--fill) 0 var(--p), #e2e8f0 var(--p) 100%); outline: none; }
+:root[dir="rtl"] .adm-range { background: linear-gradient(to left, var(--fill) 0 var(--p), #e2e8f0 var(--p) 100%); }
+.adm-range::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 9999px; background: #fff; border: 2px solid var(--fill); box-shadow: 0 1px 3px rgb(15 23 42 / .25); cursor: pointer; }
+.adm-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 9999px; background: #fff; border: 2px solid var(--fill); cursor: pointer; }
+.adm-range:focus-visible { box-shadow: 0 0 0 3px rgb(20 184 166 / .35); }
+
+/* private SOS pins on the admin map: pulsing red halo */
+.adm-sos-pin .awz-pin-ring { border-color: #dc2626 !important; border-style: solid !important; box-shadow: 0 0 0 0 rgb(220 38 38 / .6); animation: adm-sos 1.4s ease-out infinite; }
+@keyframes adm-sos { to { box-shadow: 0 0 0 14px rgb(220 38 38 / 0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .adm-skel, .adm-live-dot::after, .adm-flash, .adm-sos-pin .awz-pin-ring { animation: none; }
+}
+
+/* Urdu (Nastaliq) needs tall lines: utilities like text-sm set tight line-heights that clip it, esp. inside .truncate */
+:root[lang="ur"] .adm-root :where(*):not(.font-latin, svg, svg *) { line-height: 1.95; }
+:root[lang="ur"] .adm-root .truncate { padding-block: 0.1em; }

@@ -1,158 +1,172 @@
 import clsx from 'clsx'
-import { ArrowRight, Camera, LogIn, MapPin, Mic, Sparkles, Users, type LucideIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ArrowRight, ChevronDown, LayoutDashboard, LogIn, Map as MapIcon, Mic, ShieldCheck } from 'lucide-react'
+import { LazyMotion, MotionConfig } from 'motion/react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ORG_TYPE_META } from '../components/auth/meta'
-import { ErrorBanner } from '../components/auth/parts'
-import { AppHeader } from '../components/layout/AppHeader'
-import { Button } from '../components/ui'
+import { BuiltWith } from '../components/landing/BuiltWith'
+import { LangToggle, Logo } from '../components/landing/Brand'
+import { HeroStage } from '../components/landing/HeroStage'
+import { HowItWorks } from '../components/landing/HowItWorks'
+import { ImpactStrip } from '../components/landing/ImpactStrip'
+import { LandingFooter } from '../components/landing/LandingFooter'
+import { Responders } from '../components/landing/Responders'
+import { useLandingPins } from '../components/landing/shared'
+import { SosHighlight } from '../components/landing/SosHighlight'
+import '../components/landing/landing.css'
+import { VoiceGuide } from '../components/voice/VoiceGuide'
 import { homeFor, useAuth } from '../hooks/useAuth'
-import { useI18n } from '../lib/i18n'
-import { supabase } from '../lib/supabase'
-import { NGO_ORG_TYPES, RESPONDER_ORG_TYPES } from '../lib/types'
+import { translate, useI18n } from '../lib/i18n'
+import { stopVoice } from '../lib/voice/player'
 
-function Step({ n, icons, bg, title, body }: { n: number; icons: LucideIcon[]; bg: string; title: string; body: string }) {
-  const { t } = useI18n()
-  const First = icons[0]
-  return (
-    <li className="flex min-w-0 flex-1 flex-col items-center text-center" aria-label={`${t('auth.stepLabel', { n })}: ${title}`}>
-      <span className={clsx('relative inline-flex size-20 items-center justify-center rounded-3xl text-white shadow-lg', bg)}>
-        {icons.length === 1 ? <First className="size-10" /> : (
-          <span className="flex items-center gap-0.5">
-            {icons.map((I, i) => <I key={i} className="size-8" />)}
-          </span>
-        )}
-        <span className="font-latin absolute -top-2 -end-2 inline-flex size-7 items-center justify-center rounded-full bg-white text-sm font-black text-ink shadow">{n}</span>
-      </span>
-      <span className="mt-2 text-base font-bold leading-tight">{title}</span>
-      <span className="mt-0.5 text-xs leading-snug text-slate-600">{body}</span>
-    </li>
-  )
+const loadMotion = () => import('../components/landing/motionFeatures').then((m) => m.default)
+
+/** Keeps each phrase of a headline on one line, so it only wraps between phrases ("Your voice." / "Your neighbourhood."). */
+function Phrases({ text }: { text: string }) {
+  const parts = text.split(/(?<=[.،,])\s+/)
+  return <>{parts.map((p, i) => <span key={i}>{i > 0 && ' '}<span className="inline-block">{p}</span></span>)}</>
 }
 
-function StepArrow() {
-  return <ArrowRight aria-hidden className="mt-7 size-5 shrink-0 text-slate-300 rtl:-scale-x-100" />
-}
-
-// GLOBE_HOOK (Phase 3): the animated globe mounts into the empty #globe-hero region below. Keep it lazy-loaded.
 export default function Landing() {
-  const { t } = useI18n()
-  const { session, role, loading, signInAnonymously } = useAuth()
+  const { t, lang } = useI18n()
+  const { session, role, loading, isOnboarded } = useAuth()
   const nav = useNavigate()
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<unknown>(null)
-  const [liveCount, setLiveCount] = useState<number | null>(null)
+  const { pins, failed } = useLandingPins()
+  const ready = Boolean(session) && isOnboarded
+  const other = lang === 'ur' ? 'en' : 'ur'
 
+  // floating "Start" bar on phones once the hero button has scrolled away
+  const ctaRef = useRef<HTMLButtonElement>(null)
+  const [ctaVisible, setCtaVisible] = useState(true)
   useEffect(() => {
-    let alive = true
-    void (async () => {
-      const { count, error: e } = await supabase.from('map_pins').select('id', { count: 'exact', head: true })
-      if (alive && !e && typeof count === 'number' && count > 0) setLiveCount(count)
-    })()
-    return () => { alive = false }
+    const el = ctaRef.current
+    if (!el) return
+    const io = new IntersectionObserver(([e]) => setCtaVisible(e.isIntersecting), { threshold: 0 })
+    io.observe(el)
+    return () => io.disconnect()
   }, [])
 
-  async function start() {
-    setError(null)
-    if (session) { nav(homeFor(role)); return }
-    setBusy(true)
-    try {
-      await signInAnonymously()
-      nav('/map')
-    } catch (e) {
-      setError(e)
-    } finally {
-      setBusy(false)
-    }
+  // Start → onboarding (it signs in anonymously after the mock SMS); already set up → straight home.
+  function start() {
+    stopVoice()
+    nav(ready ? homeFor(role) : '/onboarding')
+  }
+  function go(path: string) {
+    stopVoice()
+    nav(path)
   }
 
-  const orgTypes = [...RESPONDER_ORG_TYPES, ...NGO_ORG_TYPES]
+  const home = homeFor(role)
+  const startLabel = !ready ? t('landing.start')
+    : home === '/dashboard' ? t('landing.openDashboard')
+    : home === '/admin' ? t('landing.openAdmin')
+    : t('landing.openMap')
+  const StartIcon = !ready ? Mic : home === '/map' ? MapIcon : home === '/admin' ? ShieldCheck : LayoutDashboard
+  const mapLabel = ready ? startLabel : t('landing.stageOpen')
 
   return (
-    <div className="min-h-full bg-linear-to-b from-brand-50 via-white to-white">
-      <AppHeader />
-      <main className="mx-auto flex max-w-xl flex-col px-4 pb-[max(2.5rem,env(safe-area-inset-bottom))]">
-        {/* GLOBE_HOOK — Phase 3 animated globe renders here */}
-        <div id="globe-hero" aria-hidden="true" />
+    <LazyMotion features={loadMotion} strict>
+      <MotionConfig reducedMotion="user">
+        <div className="lp-root min-h-full">
+          {/* ---------------- hero ---------------- */}
+          <section className="lp-sky relative isolate flex min-h-svh flex-col overflow-hidden">
+            <div aria-hidden className="lp-stars pointer-events-none absolute inset-0" />
+            <div aria-hidden className="lp-grain pointer-events-none absolute inset-0" />
+            <div aria-hidden className="lp-horizon pointer-events-none absolute inset-x-0 bottom-0 h-1/3" />
 
-        <section className="pt-6 text-center">
-          <div className="relative mx-auto inline-block">
-            <span aria-hidden className="absolute -inset-8 rounded-full bg-[radial-gradient(circle,var(--color-brand-100)_0%,transparent_70%)]" />
-            <h1 className="relative">
-              <span lang="ur" dir="rtl" className="font-urdu block text-7xl font-bold leading-[1.9] text-brand-700">آواز</span>
-              <span lang="en" dir="ltr" className="font-latin -mt-3 block text-3xl font-black tracking-tight text-ink">Awaaz</span>
-            </h1>
-          </div>
-          <p className="mt-3 text-xl font-bold text-ink">{t('common.tagline')}</p>
-          <p className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-brand-700">
-            <MapPin className="size-4" /> {t('auth.cityLine')}
-          </p>
-          <p className="mx-auto mt-3 max-w-md text-base text-slate-600">{t('auth.heroBody')}</p>
-        </section>
+            <header className="relative z-20 mx-auto flex w-full max-w-6xl items-center gap-2 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] lg:px-8 lg:pt-5">
+              <Logo />
+              <span className="flex-1" />
+              <LangToggle />
+              <button type="button" onClick={() => go('/login')} aria-label={t('landing.signIn')} title={t('landing.signIn')}
+                className="inline-flex size-11 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/15 transition hover:bg-white/20 active:scale-95 lg:hidden">
+                <LogIn className="size-5 rtl:-scale-x-100" />
+              </button>
+              <button type="button" onClick={() => go('/login')}
+                className="hidden min-h-11 items-center gap-2 rounded-full bg-white/10 px-4 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/20 lg:inline-flex">
+                <LogIn className="size-4 rtl:-scale-x-100" />
+                {t('landing.signIn')}
+              </button>
+            </header>
 
-        <section className="mt-7" aria-label={t('auth.howItWorks')}>
-          <ol className="flex items-start gap-1.5">
-            <Step n={1} icons={[Mic, Camera]} bg="bg-brand-700" title={t('auth.step1Title')} body={t('auth.step1Body')} />
-            <StepArrow />
-            <Step n={2} icons={[Sparkles]} bg="bg-violet-600" title={t('auth.step2Title')} body={t('auth.step2Body')} />
-            <StepArrow />
-            <Step n={3} icons={[ORG_TYPE_META.rescue_1122.icon]} bg="bg-green-600" title={t('auth.step3Title')} body={t('auth.step3Body')} />
-          </ol>
-        </section>
+            <div className="relative z-10 mx-auto grid w-full max-w-6xl flex-1 content-center items-center gap-5 px-4 pb-14 pt-3 lg:grid-cols-[1.05fr_1fr] lg:gap-12 lg:px-8 lg:pb-16">
+              <div className="lg:order-2">
+                <HeroStage pins={pins} onOpen={start} openLabel={mapLabel} />
+              </div>
 
-        <section className="mt-8 flex flex-col items-center gap-3">
-          <button
-            type="button"
-            onClick={start}
-            disabled={busy || loading}
-            className="flex min-h-20 w-full items-center justify-center gap-3 rounded-3xl bg-brand-700 px-6 text-2xl font-black text-white shadow-xl shadow-brand-700/30 transition hover:bg-brand-900 active:scale-[0.98] disabled:opacity-70"
-          >
-            <span className="inline-flex size-14 items-center justify-center rounded-full bg-white/15">
-              {busy ? <span className="size-7 animate-spin rounded-full border-4 border-white/40 border-t-white" /> : <Mic className="size-8" />}
-            </span>
-            {t('auth.startReporting')}
-          </button>
-          <p className="text-sm text-slate-600">{t('auth.startHint')}</p>
-          <ErrorBanner error={error} onDismiss={() => setError(null)} className="w-full" />
-          {liveCount !== null && (
-            <p className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm">
-              <span className="relative inline-flex size-2.5">
-                <span className="absolute inset-0 animate-ping rounded-full bg-red-500/60" />
-                <span className="relative inline-flex size-2.5 rounded-full bg-red-500" />
-              </span>
-              {t('auth.liveCount', { n: liveCount })}
-            </p>
-          )}
-          <Button variant="secondary" size="lg" icon={LogIn} onClick={() => nav('/login')} className="w-full">
-            {t('auth.signInOrgs')}
-          </Button>
-        </section>
+              <div className="text-center lg:order-1 lg:text-left lg:rtl:text-right">
+                <p className="hidden items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-teal-100 ring-1 ring-white/15 sm:inline-flex sm:text-sm">
+                  <span className="lp-live-dot" />
+                  {t('landing.liveIn')}
+                </p>
 
-        <section className="mt-10 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <Users className="size-5 text-brand-700" />
-            <h2 className="text-lg font-bold">{t('auth.forOrgsTitle')}</h2>
-          </div>
-          <p className="mt-1 text-sm text-slate-600">{t('auth.forOrgsBody')}</p>
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {orgTypes.map((ot) => {
-              const m = ORG_TYPE_META[ot]
-              const Icon = m.icon
-              return (
-                <li key={ot} className="inline-flex items-center gap-1.5 rounded-full py-1 pe-3 ps-1 text-sm font-semibold" style={{ background: m.soft, color: m.color }}>
-                  <span className="inline-flex size-7 items-center justify-center rounded-full text-white" style={{ background: m.color }}>
-                    <Icon className="size-4" />
+                <h1 className="sm:mt-3">
+                  <span lang="ur" dir="rtl" className="font-urdu block text-[2.3rem] font-bold leading-[1.75] text-white sm:text-5xl lg:text-[3.6rem] lg:leading-[1.7]">
+                    <Phrases text={translate('ur', 'landing.headlinePrimary')} />
                   </span>
-                  {t(`auth.orgType_${ot}`)}
-                </li>
-              )
-            })}
-          </ul>
-          <Button variant="primary" size="md" icon={ArrowRight} onClick={() => nav('/login?tab=signup&role=responder')} className="mt-4 w-full [&>svg]:rtl:-scale-x-100">
-            {t('auth.registerOrg')}
-          </Button>
-        </section>
-      </main>
-    </div>
+                  <span lang="en" dir="ltr" className="font-latin lp-grad-text mt-1 block text-balance text-[1.7rem] font-black leading-[1.15]! tracking-tight sm:text-4xl lg:text-5xl">
+                    <Phrases text={translate('en', 'landing.headlinePrimary')} />
+                  </span>
+                </h1>
+
+                <p className="mx-auto mt-3 max-w-xl text-[0.95rem] leading-relaxed text-white/80 sm:mt-4 sm:text-lg lg:mx-0">{t('landing.valueProp')}</p>
+
+                <div className="mx-auto mt-5 max-w-md sm:mt-6 lg:mx-0 lg:max-w-lg">
+                  <button ref={ctaRef} type="button" onClick={start} disabled={loading}
+                    className="lp-cta-shine group flex min-h-[4.75rem] w-full items-center gap-3 rounded-full bg-white py-2 pe-5 ps-2 text-start text-[1.35rem] font-black leading-tight text-[#06213a] shadow-[0_20px_50px_-12px_rgba(45,212,191,.45)] transition hover:bg-teal-50 active:scale-[0.98] disabled:opacity-80 sm:text-2xl">
+                    <span className="relative inline-flex size-[3.75rem] shrink-0 items-center justify-center rounded-full bg-linear-to-b from-amber-400 to-amber-500 text-white shadow-lg shadow-amber-500/40">
+                      {!ready && <><span className="lp-cta-ring" /><span className="lp-cta-ring lp-d2" /></>}
+                      <StartIcon className="relative size-8" />
+                    </span>
+                    <span className="min-w-0 flex-1">{startLabel}</span>
+                    <ArrowRight className="size-7 shrink-0 transition group-hover:translate-x-1 rtl:-scale-x-100 rtl:group-hover:-translate-x-1" />
+                  </button>
+                  <p className="mt-2.5 text-sm text-white/65">{t('landing.startSub')}</p>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-3 sm:mt-5 lg:justify-start">
+                  <VoiceGuide prompt="welcome" size={52} className="bg-amber-300/15! text-amber-100! ring-amber-300/40!" />
+                  <button type="button" onClick={() => go('/login')}
+                    className="inline-flex min-h-[3.25rem] items-center gap-2 rounded-full px-4 text-sm font-semibold text-white/85 ring-1 ring-white/20 transition hover:bg-white/10 lg:hidden">
+                    <LogIn className="size-4 rtl:-scale-x-100" />
+                    {t('landing.signInShort')}
+                  </button>
+                </div>
+                <p lang={other} className={clsx('mt-3 text-xs text-white/45', other === 'ur' ? 'font-urdu' : 'font-latin')}>
+                  <bdi dir={other === 'ur' ? 'rtl' : 'ltr'}>{translate(other, 'landing.valueProp')}</bdi>
+                </p>
+              </div>
+            </div>
+
+            <a href="#how" aria-label={t('landing.scrollHint')}
+              className="lp-bounce absolute bottom-3 start-1/2 z-10 hidden -translate-x-1/2 items-center gap-1 text-xs font-semibold text-white/55 hover:text-white/80 sm:inline-flex rtl:translate-x-1/2">
+              {t('landing.scrollHint')} <ChevronDown className="size-4" />
+            </a>
+          </section>
+
+          {/* ---------------- below the fold ---------------- */}
+          <main className="relative">
+            <div className="bg-white"><HowItWorks /></div>
+            <ImpactStrip pins={pins} failed={failed} />
+            <Responders onRegister={() => go('/login?tab=signup&role=responder')} />
+            <SosHighlight onOpen={() => go('/sos')} />
+            <BuiltWith />
+          </main>
+
+          <LandingFooter onStart={start} startLabel={startLabel} onSignIn={() => go('/login')} onSos={() => go('/sos')} />
+
+          {/* phones: Start stays one tap away */}
+          <div className={clsx('lp-float fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 lg:hidden', ctaVisible && 'is-hidden')}>
+            <button type="button" onClick={start} tabIndex={ctaVisible ? -1 : 0}
+              className="mx-auto flex min-h-16 w-full max-w-md items-center gap-3 rounded-full bg-[#06213a] py-2 pe-5 ps-2 text-lg font-black text-white shadow-2xl shadow-black/40 ring-1 ring-white/15 active:scale-[0.98]">
+              <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-linear-to-b from-amber-400 to-amber-500">
+                <StartIcon className="size-6" />
+              </span>
+              <span className="min-w-0 flex-1 text-start">{startLabel}</span>
+              <ArrowRight className="size-6 shrink-0 rtl:-scale-x-100" />
+            </button>
+          </div>
+        </div>
+      </MotionConfig>
+    </LazyMotion>
   )
 }
