@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-urdu: "Noto Nastaliq Urdu", "Inter", serif;
+  --color-brand-50: #f0fdfa;
+  --color-brand-100: #ccfbf1;
+  --color-brand-500: #14b8a6;
+  --color-brand-600: #0d9488;
+  --color-brand-700: #0f766e;
+  --color-brand-900: #134e4a;
+  --color-ink: #0f172a;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: #f8fafc;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+/* Urdu: Nastaliq needs generous line-height */
+:root[lang="ur"] body { font-family: var(--font-urdu); line-height: 2; }
+:root[lang="ur"] .font-latin { font-family: var(--font-sans); line-height: 1.5; }
+button { touch-action: manipulation; }

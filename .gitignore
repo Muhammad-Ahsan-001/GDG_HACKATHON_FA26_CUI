@@ -5,3 +5,14 @@ node_modules/
 .next/
 dist/
 supabase/.temp/
+.secrets/
+supabase/functions/.env
+dist-ssr
+*.local
+dev-dist
+logs
+*.log
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
