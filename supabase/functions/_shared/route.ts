@@ -49,9 +49,10 @@ async function loadCluster(clusterId: string): Promise<ClusterRow> {
 }
 
 /** Should this cluster be routed to responders now? (verified, or high/critical routed early) */
-export function shouldRoute(status: ReportStatus, urgency: Urgency): boolean {
+/** Route when verified, when high/critical (early, labelled unconfirmed), or always for food rescue (time-critical). */
+export function shouldRoute(status: ReportStatus, urgency: Urgency, category?: string | null): boolean {
   if (status === 'resolved') return false
-  return status === 'verified' || HIGH.includes(urgency)
+  return status === 'verified' || HIGH.includes(urgency) || category === 'food'
 }
 
 function km(m: number | null | undefined): { en: string; ur: string } {
@@ -284,13 +285,14 @@ export async function escalateCluster(
   opts: { excludeReporterIds?: string[] } = {},
 ): Promise<RoutedOrg[]> {
   try {
-    const { data } = await adminClient().from('clusters').select('urgency, status, nearby_notified_at')
+    const { data } = await adminClient().from('clusters').select('urgency, status, category, nearby_notified_at')
       .eq('id', clusterId).maybeSingle()
     const urgency = ((data as { urgency?: Urgency } | null)?.urgency ?? 'medium') as Urgency
     const status = ((data as { status?: ReportStatus } | null)?.status ?? v.status) as ReportStatus
     const nearbyDone = Boolean((data as { nearby_notified_at?: string | null } | null)?.nearby_notified_at)
+    const category = (data as { category?: string } | null)?.category ?? null
 
-    const routed = shouldRoute(status, urgency)
+    const routed = shouldRoute(status, urgency, category)
       ? await routeCluster(clusterId, { verifiedNow: v.changed_to_verified })
       : await listRouted(clusterId)
 

@@ -91,7 +91,7 @@ async function demoImage(name, prompt) {
 
 async function uploadImage(c, clientId, buf) {
   const path = `${clientId}/0.jpg`
-  const { error } = await c.storage.from('report-images').upload(path, buf, { contentType: 'image/png', upsert: true })
+  const { error } = await c.storage.from('report-images').upload(path, buf, { contentType: 'image/png', upsert: false })
   if (error) throw new Error(`image upload: ${error.message}`)
   return path
 }

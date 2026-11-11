@@ -16,11 +16,11 @@ serve(async (req) => {
   if (!UUID.test(clusterId)) throw new HttpError(400, 'cluster_id must be a uuid', 'bad_request')
 
   if (user) {
-    const { data, error } = await adminClient().from('clusters').select('status, urgency').eq('id', clusterId).maybeSingle()
+    const { data, error } = await adminClient().from('clusters').select('status, urgency, category').eq('id', clusterId).maybeSingle()
     if (error) throw new Error(`cluster lookup failed: ${error.message}`)
     if (!data) throw new HttpError(404, 'Cluster not found', 'not_found')
     const c = data as { status: ReportStatus; urgency: Urgency }
-    if (!shouldRoute(c.status, c.urgency)) {
+    if (!shouldRoute(c.status, c.urgency, (c as { category?: string }).category)) {
       throw new HttpError(403, 'Only verified or high-urgency pins can be routed', 'not_eligible')
     }
   }
