@@ -1,0 +1,6 @@
+# keep server-side secrets and the Supabase backend out of Vercel uploads (the Vite build only needs src/ + public/)
+.secrets
+supabase
+.env
+node_modules
+dist

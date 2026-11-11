@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { PwaLayer } from './components/pwa/PwaLayer'
 import { Spinner } from './components/ui'
 import { AuthProvider, homeFor, useAuth } from './hooks/useAuth'
 import { I18nProvider } from './lib/i18n'
@@ -33,6 +34,8 @@ export default function App() {
     <I18nProvider>
       <AuthProvider>
         <BrowserRouter>
+          {/* global PWA UI: offline pill, update + install prompts, toasts (incl. foreground push), push token sync */}
+          <PwaLayer />
           <Suspense fallback={<FullScreenSpinner />}>
             <Routes>
               <Route path="/" element={<Landing />} />

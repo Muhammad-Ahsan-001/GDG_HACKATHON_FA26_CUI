@@ -25,7 +25,7 @@ export function AppHeader({ floating, right }: { floating?: boolean; right?: Rea
   )
   return (
     <header className={clsx(
-      'z-30 flex items-center gap-2 px-3 py-2',
+      'z-30 flex items-center gap-2 px-3 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))]',
       floating ? 'pointer-events-none absolute inset-x-0 top-0 [&>*]:pointer-events-auto' : 'sticky top-0 border-b border-slate-200 bg-white/95 backdrop-blur',
     )}>
       <button onClick={() => nav('/')} className="flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 shadow-sm">
