@@ -49,7 +49,7 @@ Repo root = Vite app (deployed to Vercel). Backend lives in `supabase/`.
 
 Extensions (schema `extensions`): `postgis`, `vector`, `pgcrypto` (gen_random_uuid is core).
 All geo columns are `extensions.geography(Point|Polygon,4326)`. Embedding dim = **1536**
-(`text-embedding-3-small`; Gemini fallback uses `gemini-embedding-001` with outputDimensionality 1536 —
+(`text-embedding-3-large` with dimensions=1536; Gemini fallback would use `gemini-embedding-001` with outputDimensionality 1536 —
 vectors from different models are never compared: match on `embedding_model`).
 
 ### Enums
@@ -332,3 +332,10 @@ login) · `/report` (report sheet over map) · `/pin/:id` (pin sheet over map) �
 
 ## Deviations
 (append here: who, what, why)
+- lead: `_shared/cors.ts` merged into `_shared/http.ts` (exports corsHeaders, json, errorResponse, readJson, serve, HttpError, background).
+  `_shared/supabase.ts` (adminClient, userClient, isServiceRequest, requireUser, requireServiceOrUser) and `_shared/models.ts`,
+  `_shared/config.ts`, `_shared/types.ts` are written by the lead — import them, don't rewrite them.
+- lead: embeddings = `text-embedding-3-large` with `dimensions: 1536`. Extraction/reasoning = `gpt-6-luna` (Responses API,
+  reasoning.effort "low", NO temperature), vision = `gpt-6.1-terra`, STT = `gpt-transcribe` (languages[]), TTS = `gpt-4o-mini-tts`.
+- lead: frontend shared header = `src/components/layout/AppHeader.tsx` (`<AppHeader floating? right? />`).
+- lead: demo accounts list = `src/lib/demoAccounts.ts` (password constant DEMO_PASSWORD).
