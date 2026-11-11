@@ -257,6 +257,72 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(openOrFocus(targetPath(event.notification.data)))
 })
 
+// ---------------------------------------------------------------- Background Sync (offline report queue)
+// The page queues reports in IndexedDB (src/lib/offlineQueue.ts) and registers this tag. Uploads need the page's
+// Supabase session (localStorage, not readable here), so the worker only wakes the open page(s) and waits for their
+// answer: {remaining} reports still waiting → reject so the browser retries the sync later with its own backoff.
+// No page open: show a gentle "open Awaaz to send your saved report" notification (when allowed) and finish.
+const SYNC_TAG = 'awaaz-report-sync'
+const SYNC_MSG = 'awaaz-sync'
+const SYNC_REPLY_MS = 25_000
+const QUEUE_NOTE_TAG = 'awaaz-queue'
+
+interface SyncEventLike extends ExtendableEvent { readonly tag: string; readonly lastChance?: boolean }
+
+self.addEventListener('sync', (event) => {
+  const e = event as SyncEventLike
+  if (e.tag !== SYNC_TAG) return
+  e.waitUntil(syncQueuedReports(Boolean(e.lastChance)))
+})
+
+async function syncQueuedReports(lastChance: boolean): Promise<void> {
+  const windows = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
+    .filter((c) => new URL(c.url).origin === self.location.origin)
+  if (!windows.length) {
+    await nudgeToOpen()
+    return
+  }
+  const replies = await Promise.all(windows.map(askPageToFlush))
+  if (replies.some((left) => left === 0)) return
+  // still waiting (server down / no session yet): let the browser try again later
+  if (!lastChance) throw new Error('awaaz: reports still waiting')
+}
+
+/** Post {type:'awaaz-sync'} with a reply port; resolves with the page's remaining count (null = no answer). */
+function askPageToFlush(client: Client): Promise<number | null> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel()
+    const timer = setTimeout(() => resolve(null), SYNC_REPLY_MS)
+    channel.port1.onmessage = (ev: MessageEvent<{ remaining?: unknown }>) => {
+      clearTimeout(timer)
+      resolve(typeof ev.data?.remaining === 'number' ? ev.data.remaining : null)
+    }
+    try {
+      client.postMessage({ type: SYNC_MSG }, [channel.port2])
+    } catch {
+      clearTimeout(timer)
+      resolve(null)
+    }
+  })
+}
+
+async function nudgeToOpen(): Promise<void> {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  const options: ShowOptions = {
+    // bilingual on purpose: the worker cannot read the page's language setting
+    body: 'انٹرنیٹ آ گیا ہے۔ محفوظ رپورٹ بھیجنے کے لیے آواز کھولیں۔\nYou are back online. Open Awaaz to send your saved report.',
+    icon: ICON,
+    badge: BADGE,
+    tag: QUEUE_NOTE_TAG,
+    renotify: false,
+    dir: 'auto',
+    timestamp: Date.now(),
+    vibrate: [120],
+    data: { url: FALLBACK_URL, type: 'offline_queue' },
+  }
+  await self.registration.showNotification(APP_TITLE, options).catch(() => undefined)
+}
+
 // ---------------------------------------------------------------- Firebase Cloud Messaging (background)
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,

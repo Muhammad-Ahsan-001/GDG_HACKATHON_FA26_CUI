@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import {
   Building2, Camera, Clock, Keyboard, MapPinOff, Mic, Navigation, Share2, Square, ThumbsDown, ThumbsUp,
-  Timer, Users, Utensils, Volume2,
+  Users, Volume2,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
@@ -12,6 +12,9 @@ import { useI18n } from '../../lib/i18n'
 import { STATUS_META } from '../../lib/status'
 import { supabase } from '../../lib/supabase'
 import type { Lang, MapPin, PublicReport, VoteType } from '../../lib/types'
+import { FoodPanel } from '../food/FoodPanel'
+import { NearbyPinBanner } from '../food/NearbyPinBanner'
+import { useFoodAssignment } from '../food/useFoodAssignment'
 import { AttributeChips } from '../report/AttributeChips'
 import {
   AiLabel, CategoryIcon, EmptyState, Sheet, Spinner, StatusBadge, UrgencyBadge, useTimeAgo,
@@ -135,6 +138,11 @@ function PinSheetBody({ clusterId, onClose, pin: livePin, userLocation }: PinShe
 
   const base = livePin ?? fetched
   const pin = useMemo<MapPin | null>(() => (base ? { ...base, ...override } : null), [base, override])
+  // food rescue: NGO / responder whose organisation was alerted → "Go to dashboard to claim"
+  const foodAssignment = useFoodAssignment(
+    clusterId,
+    Boolean(pin && (pin.category === 'food' || pin.food_servings != null || pin.safe_until != null)),
+  )
 
   // ---- audio (TTS) ----
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -310,6 +318,21 @@ function PinSheetBody({ clusterId, onClose, pin: livePin, userLocation }: PinShe
           )}
         </div>
 
+        {/* nearby danger context (also when opened from a nearby alert) */}
+        <NearbyPinBanner pin={pin} distanceM={dist} />
+
+        {/* food rescue: servings, food type, live safe-to-eat countdown, pickup details, org CTA */}
+        {isFood && (
+          <FoodPanel
+            servings={pin.food_servings}
+            foodType={pin.food_type}
+            safeUntil={pin.safe_until}
+            createdAt={pin.created_at}
+            attributes={pin.attributes}
+            assignment={foodAssignment}
+          />
+        )}
+
         {/* what reporters told the AI intake (danger first) */}
         {hasAttributes && (
           <section aria-label={t('map.whatWeKnow')}>
@@ -372,20 +395,6 @@ function PinSheetBody({ clusterId, onClose, pin: livePin, userLocation }: PinShe
               className={clsx('w-full', photoOpen ? 'max-h-[70dvh] object-contain' : 'h-52 object-cover')}
             />
           </button>
-        )}
-
-        {/* food */}
-        {isFood && (pin.food_servings != null || pin.safe_until) && (
-          <section className="flex flex-col gap-2 rounded-2xl p-3" style={{ background: CATEGORY_META.food.soft }}>
-            {pin.food_servings != null && (
-              <div className="flex items-center gap-2 font-bold" style={{ color: CATEGORY_META.food.color }}>
-                <Utensils className="size-6" />
-                {t('map.servings', { n: pin.food_servings })}
-                {pin.food_type && <span className="font-normal text-slate-700">· {pin.food_type}</span>}
-              </div>
-            )}
-            {pin.safe_until && <SafeCountdown until={pin.safe_until} />}
-          </section>
         )}
 
         {/* claimed */}
@@ -543,42 +552,5 @@ function ReportRow({ report }: { report: PublicReport }) {
         <img src={report.photo_url} alt={t('map.photoAlt')} loading="lazy" decoding="async" className="size-14 shrink-0 rounded-xl bg-slate-100 object-cover" />
       )}
     </li>
-  )
-}
-
-const LRI = String.fromCharCode(0x2066) // left-to-right isolate
-const PDI = String.fromCharCode(0x2069) // pop directional isolate
-
-/** Live countdown until cooked food is no longer safe. Only this tiny component re-renders every second. */
-function SafeCountdown({ until }: { until: string }) {
-  const { t } = useI18n()
-  const end = useMemo(() => new Date(until).getTime(), [until])
-  const [now, setNow] = useState(() => Date.now())
-  const expired = now >= end
-  useEffect(() => {
-    if (expired) return
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [expired])
-  if (!Number.isFinite(end)) return null
-  if (expired) {
-    return (
-      <div className="flex items-center gap-2 font-bold text-red-700">
-        <Timer className="size-6" />
-        {t('map.expired')}
-      </div>
-    )
-  }
-  const s = Math.floor((end - now) / 1000)
-  const hh = Math.floor(s / 3600)
-  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0')
-  const ss = String(s % 60).padStart(2, '0')
-  const urgent = s < 30 * 60
-  return (
-    <div className={clsx('flex items-center gap-2 font-bold', urgent ? 'text-red-700' : 'text-slate-800')}>
-      <Timer className="size-6" />
-      {/* LRI/PDI isolate the LTR clock inside Urdu text */}
-      <span>{t('map.safeFor', { t: LRI + `${hh}:${mm}:${ss}` + PDI })}</span>
-    </div>
   )
 }

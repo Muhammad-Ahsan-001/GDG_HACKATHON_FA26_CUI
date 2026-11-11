@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import '../components/dashboard/dashboard.css'
 import { AlertToasts, type ToastItem } from '../components/dashboard/AlertToast'
 import { AssignmentCard } from '../components/dashboard/AssignmentCard'
+import { DailyDigest } from '../components/dashboard/DailyDigest'
 import { DashboardMap, type ServiceArea } from '../components/dashboard/DashboardMap'
 import { EnableAlertsButton } from '../components/dashboard/EnableAlertsButton'
 import { ListPanel, type SosListContext } from '../components/dashboard/ListPanel'
@@ -92,10 +93,10 @@ function Shell({ children }: { children: ReactNode }) {
   )
 }
 
-// DAILY_DIGEST_HOOK (Phase 2 daily AI summary): render the org's daily AI digest card here
-// (api.digestDaily(orgId) -> { en, ur }, shown with <AiLabel/>). Intentionally renders nothing for now.
-function DailyDigestSlot() {
-  return null
+// DAILY_DIGEST_HOOK (Phase 2 daily AI summary): collapsible AI digest card at the top of the list column.
+// One organisation selected -> that org's last 24 h; admin / "all" filter -> city-wide.
+function DailyDigestSlot({ orgId, orgName }: { orgId: string | null; orgName?: string | null }) {
+  return <DailyDigest orgId={orgId} orgName={orgName} />
 }
 
 function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendingOrgs: DashOrg[]; isAdmin: boolean }) {
@@ -456,7 +457,7 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
             view === 'list' ? 'flex' : 'hidden',
           )}
         >
-          <DailyDigestSlot />
+          <DailyDigestSlot orgId={orgId} orgName={filterOrg?.name} />
           <ListPanel
             tab={tab}
             onTab={setTab}

@@ -131,6 +131,28 @@ const en = {
   durMin: '{m} min',
   durHourMin: '{h} h {m} min',
   durDayHour: '{d} d {h} h',
+
+  // Phase 2: daily AI summary card
+  digestTitle: "Today's summary",
+  digestTitleCity: 'City-wide summary today',
+  digestScopeOrg: '{name} · last 24 hours',
+  digestScopeCity: 'Islamabad & Rawalpindi · last 24 hours',
+  digestLoading: 'Preparing the summary…',
+  digestError: 'Could not load the summary.',
+  digestOffline: 'You are offline.',
+  digestGenerated: 'Generated {t}',
+  digestCountAlerts: 'Based on {n} alerts',
+  digestCountAlerts1: 'Based on 1 alert',
+  digestCountReports: 'Based on {n} reports',
+  digestCountReports1: 'Based on 1 report',
+  digestQuick: 'Quick summary',
+  digestListen: 'Listen',
+  digestStop: 'Stop',
+  digestPreparing: 'Preparing voice…',
+  digestNoVoice: 'Voice is not available right now',
+  digestRefresh: 'Refresh summary',
+  digestExpand: 'Show summary',
+  digestCollapse: 'Hide summary',
 }
 
 const ur: Record<keyof typeof en, string> = {
@@ -253,6 +275,27 @@ const ur: Record<keyof typeof en, string> = {
   durMin: '{m} منٹ',
   durHourMin: '{h} گھنٹے {m} منٹ',
   durDayHour: '{d} دن {h} گھنٹے',
+
+  digestTitle: 'آج کا خلاصہ',
+  digestTitleCity: 'پورے شہر کا آج کا خلاصہ',
+  digestScopeOrg: '{name} · پچھلے 24 گھنٹے',
+  digestScopeCity: 'اسلام آباد اور راولپنڈی · پچھلے 24 گھنٹے',
+  digestLoading: 'خلاصہ تیار ہو رہا ہے…',
+  digestError: 'خلاصہ لوڈ نہیں ہو سکا۔',
+  digestOffline: 'آپ آف لائن ہیں۔',
+  digestGenerated: '{t} تیار ہوا',
+  digestCountAlerts: '{n} الرٹس کی بنیاد پر',
+  digestCountAlerts1: '1 الرٹ کی بنیاد پر',
+  digestCountReports: '{n} رپورٹس کی بنیاد پر',
+  digestCountReports1: '1 رپورٹ کی بنیاد پر',
+  digestQuick: 'فوری خلاصہ',
+  digestListen: 'سنیں',
+  digestStop: 'روکیں',
+  digestPreparing: 'آواز تیار ہو رہی ہے…',
+  digestNoVoice: 'ابھی آواز دستیاب نہیں',
+  digestRefresh: 'خلاصہ تازہ کریں',
+  digestExpand: 'خلاصہ دکھائیں',
+  digestCollapse: 'خلاصہ چھپائیں',
 }
 
 export default { en, ur } satisfies Namespace

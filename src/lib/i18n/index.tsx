@@ -3,13 +3,9 @@ import type { Lang } from '../types'
 import common from './common'
 import map from './map'
 import report from './report'
-import auth from './auth'
-import dashboard from './dashboard'
 import pwa from './pwa'
 import sos from './sos'
-import onboarding from './onboarding'
-import admin from './admin'
-import landing from './landing'
+import alerts from './alerts'
 
 /**
  * i18n: one namespace file per area, each `export default { en: {...}, ur: {...} } satisfies Namespace`.
@@ -17,7 +13,45 @@ import landing from './landing'
  * Builders add keys ONLY to their own namespace file.
  */
 export type Namespace = { en: Record<string, string>; ur: Record<string, string> }
-const NAMESPACES: Record<string, Namespace> = { common, map, report, auth, dashboard, pwa, sos, onboarding, landing, admin }
+const NAMESPACES: Record<string, Namespace> = { common, map, report, pwa, sos, alerts }
+
+/**
+ * Area namespaces used only by their own lazy page: kept out of the startup bundle (cheap phones on /map).
+ * App.tsx loads them together with the page chunk (loadNamespaces), so a page never renders before its strings.
+ * A key from a namespace that is not loaded yet starts loading it and falls back to the key until it arrives.
+ */
+const LAZY_NAMESPACES = {
+  auth: () => import('./auth'),
+  dashboard: () => import('./dashboard'),
+  onboarding: () => import('./onboarding'),
+  landing: () => import('./landing'),
+  admin: () => import('./admin'),
+} satisfies Record<string, () => Promise<{ default: Namespace }>>
+export type LazyNamespace = keyof typeof LAZY_NAMESPACES
+
+const pendingNs = new Map<string, Promise<void>>()
+const nsListeners = new Set<() => void>()
+
+function isLazyNamespace(name: string): name is LazyNamespace {
+  return Object.prototype.hasOwnProperty.call(LAZY_NAMESPACES, name)
+}
+
+/** Load lazy namespaces (idempotent). Rejects if a chunk cannot be fetched; callers may ignore that. */
+export function loadNamespaces(...names: LazyNamespace[]): Promise<void> {
+  return Promise.all(names.map((name) => {
+    if (NAMESPACES[name]) return undefined
+    let p = pendingNs.get(name)
+    if (!p) {
+      p = LAZY_NAMESPACES[name]().then((m) => {
+        NAMESPACES[name] = m.default
+        nsListeners.forEach((l) => l())
+      })
+      p.catch(() => { pendingNs.delete(name) }) // allow a retry later
+      pendingNs.set(name, p)
+    }
+    return p
+  })).then(() => undefined)
+}
 
 const STORAGE_KEY = 'awaaz.lang'
 
@@ -31,7 +65,9 @@ function readStoredLang(): Lang {
 
 export function translate(lang: Lang, key: string, vars?: Record<string, string | number>): string {
   const dot = key.indexOf('.')
-  const ns = NAMESPACES[key.slice(0, dot)]
+  const nsName = key.slice(0, dot)
+  const ns = NAMESPACES[nsName]
+  if (!ns && isLazyNamespace(nsName)) void loadNamespaces(nsName).catch(() => undefined)
   const k = key.slice(dot + 1)
   let s = ns?.[lang]?.[k] ?? ns?.en?.[k] ?? key
   if (vars) for (const [name, val] of Object.entries(vars)) s = s.split(`{${name}}`).join(String(val))
@@ -53,6 +89,13 @@ const Ctx = createContext<I18nCtx | null>(null)
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(readStoredLang)
   const dir = lang === 'ur' ? 'rtl' : 'ltr'
+  // bumps when a lazy namespace arrives, so components that rendered its keys early re-render with the strings
+  const [nsVersion, setNsVersion] = useState(0)
+  useEffect(() => {
+    const onLoaded = () => setNsVersion((v) => v + 1)
+    nsListeners.add(onLoaded)
+    return () => { nsListeners.delete(onLoaded) }
+  }, [])
 
   useEffect(() => {
     document.documentElement.lang = lang
@@ -71,7 +114,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     toggleLang: () => setLang(lang === 'ur' ? 'en' : 'ur'),
     t: (key, vars) => translate(lang, key, vars),
     pick: (en, ur) => (lang === 'ur' ? ur || en : en || ur) || '',
-  }), [lang, dir, setLang])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- nsVersion: new t() identity once lazy strings load
+  }), [lang, dir, setLang, nsVersion])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

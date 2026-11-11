@@ -3,7 +3,7 @@ import {
   Bell, BellRing, ChevronLeft, ChevronRight, CircleCheck, CircleX, Info, TriangleAlert, X, type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { CATEGORY_META } from '../../lib/categories'
 import { useI18n } from '../../lib/i18n'
 import { onForegroundMessage } from '../../lib/push'
@@ -49,11 +49,14 @@ function vibrate(pattern: number[]) {
 export function Toaster() {
   const toasts = useToasts()
   const { t } = useI18n()
+  // SOS is a silent, discreet screen: no toast may pop up or buzz there (an attacker could see / feel it)
+  const quiet = useLocation().pathname.startsWith('/sos')
   const tRef = useRef(t)
   useEffect(() => { tRef.current = t }, [t])
 
   // While the app is visible the SW shows no system notification — surface the push here instead.
   useEffect(() => onForegroundMessage((m) => {
+    if (window.location.pathname.startsWith('/sos')) return
     // the dashboard shows its own banner + beep for new cases (realtime); avoid a second toast there
     if (m.type === 'new_assignment' && window.location.pathname.startsWith('/dashboard')) return
     const meta = pushTypeMeta(m.type)
@@ -69,6 +72,7 @@ export function Toaster() {
     vibrate(meta.urgent ? [200, 100, 200] : [80])
   }), [])
 
+  if (quiet) return null
   return (
     <div className="flex w-full flex-col items-center gap-2 empty:hidden" role="status" aria-live="polite">
       {toasts.map((item) => <ToastCard key={item.id} item={item} />)}

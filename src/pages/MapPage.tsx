@@ -1,17 +1,16 @@
 import clsx from 'clsx'
 import type L from 'leaflet'
-import { RefreshCw, TriangleAlert } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Marker, useMap } from 'react-leaflet'
+import { MapPinOff, RefreshCw, TriangleAlert } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
 import { AppHeader } from '../components/layout/AppHeader'
 import { ActionBar, LocateButton } from '../components/map/ActionBar'
 import { CategoryFilter } from '../components/map/CategoryFilter'
 import { CoachMark, coachSeen, markCoachSeen } from '../components/map/CoachMark'
+import { DigestButton } from '../components/map/DigestButton'
+import type { MapCanvasProps } from '../components/map/MapCanvas'
+import { loadMapCanvas } from '../components/map/loadMapCanvas'
 import '../components/map/map.css'
-import { BaseMap, ClusterLayer, InvalidateOnResize, type ClusterItem } from '../components/leaflet/BaseMap'
-import { pinIcon, userDotIcon } from '../components/leaflet/icons'
-import { PinSheet } from '../components/map/PinSheet'
 import { SosButton } from '../components/sos/SosButton'
 import { Spinner } from '../components/ui'
 import { VoiceGuide } from '../components/voice/VoiceGuide'
@@ -24,9 +23,49 @@ import { useI18n } from '../lib/i18n'
 import { stopVoice } from '../lib/voice/player'
 import type { Category, MapPin, ProcessReportResponse } from '../lib/types'
 
-// Report sheet (other builder) is code-split: the map paints first, the chunk is prefetched when idle.
+// Code-split so the page shell (SOS, mic, chips) paints first on a cheap phone:
+// - the Leaflet canvas (leaflet + markercluster) starts downloading together with this chunk (App.tsx);
+// - the report / pin / digest sheets load on demand and are prefetched when idle.
 const loadReportSheet = () => import('../components/report/ReportSheet')
 const ReportSheet = lazy(() => loadReportSheet().then((m) => ({ default: m.ReportSheet })))
+const loadPinSheet = () => import('../components/map/PinSheet')
+const PinSheet = lazy(() => loadPinSheet().then((m) => ({ default: m.PinSheet })))
+const loadDigestSheet = () => import('../components/map/DigestSheet')
+const DigestSheet = lazy(() => loadDigestSheet().then((m) => ({ default: m.DigestSheet })))
+// a failed canvas chunk (flaky network) must not blank the page: show a retry card instead
+// (a handled vite:preloadError resolves the import to undefined while main.tsx reloads the page)
+const MapCanvas = lazy((): Promise<{ default: ComponentType<MapCanvasProps> }> => loadMapCanvas()
+  .then((m) => ((m as typeof m | undefined) ?? { default: MapUnavailable }))
+  .catch(() => ({ default: MapUnavailable })))
+
+/** Shown where the map would be while its chunk downloads. */
+function MapPlaceholder() {
+  return (
+    <div aria-hidden className="awaaz-map-placeholder absolute inset-0 z-0 flex items-center justify-center">
+      <Spinner className="size-9 text-brand-700/60" />
+    </div>
+  )
+}
+
+/** The map chunk could not be fetched (offline before it was cached, or a stale deploy). */
+function MapUnavailable() {
+  const { t } = useI18n()
+  return (
+    <div className="awaaz-map-placeholder absolute inset-0 z-0 flex items-center justify-center px-6">
+      <div role="alert" className="flex max-w-xs flex-col items-center gap-3 rounded-3xl bg-white/95 p-5 text-center shadow-lg">
+        <MapPinOff className="size-10 text-slate-500" aria-hidden />
+        <p className="text-base font-bold text-ink">{t('map.mapUnavailable')}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-brand-700 px-5 text-base font-semibold text-white active:scale-[0.98]"
+        >
+          <RefreshCw className="size-5" aria-hidden /> {t('common.retry')}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 type ReportMode = 'voice' | 'photo' | 'text'
 type LatLng = { lat: number; lng: number }
@@ -69,16 +108,6 @@ function panToPin(map: L.Map, p: LatLng, dir: 'rtl' | 'ltr') {
   const dy = mobile ? Math.round(window.innerHeight * 0.22) : 0
   const pt = map.project([p.lat, p.lng], targetZoom).add([dx, dy])
   map.flyTo(map.unproject(pt, targetZoom), targetZoom, { duration: 0.6 })
-}
-
-/** Hands the Leaflet map instance up to the page (for locate / pan). */
-function MapBridge({ onMap }: { onMap: (m: L.Map | null) => void }) {
-  const map = useMap()
-  useEffect(() => {
-    onMap(map)
-    return () => onMap(null)
-  }, [map, onMap])
-  return null
 }
 
 export default function MapPage() {
@@ -138,28 +167,6 @@ export default function MapPage() {
     }
     return list
   }, [pins, selectedId, byId])
-
-  const markerItems = useMemo<ClusterItem[]>(() => visiblePins.map((p) => {
-    const rank = URGENCY_META[p.urgency]?.rank ?? 1
-    const active = p.status !== 'resolved' && p.status !== 'disputed'
-    const selected = p.id === selectedId
-    return {
-      id: p.id,
-      lat: p.lat,
-      lng: p.lng,
-      icon: pinIcon({
-        category: p.category,
-        status: p.status,
-        urgency: p.urgency,
-        count: p.report_count,
-        selected,
-        pulse: !LOW_END && rank >= 2 && (p.status === 'unconfirmed' || p.status === 'verified'),
-        flash: highlighted.has(p.id),
-      }),
-      hot: active && rank >= 2,
-      zIndexOffset: selected ? 100000 : (active ? 2000 : 0) + rank * 100,
-    }
-  }), [visiblePins, selectedId, highlighted])
 
   const selectedPin = selectedId ? byId.get(selectedId) ?? null : null
 
@@ -224,7 +231,11 @@ export default function MapPage() {
 
   // ---- report flow ----
   useEffect(() => {
-    const id = window.setTimeout(() => { void loadReportSheet().catch(() => {}) }, 2500)
+    const id = window.setTimeout(() => {
+      void loadReportSheet().catch(() => {})
+      void loadPinSheet().catch(() => {})
+      void loadDigestSheet().catch(() => {})
+    }, 2500)
     return () => window.clearTimeout(id)
   }, [])
   const goVoice = useCallback(() => { navRef.current('/report?mode=voice') }, [])
@@ -261,24 +272,32 @@ export default function MapPage() {
 
   const showEmpty = !loading && !error && pins.length === 0 && !isReport && !selectedId && !showCoach
 
+  // ---- NEARBY_DIGEST_HOOK: "what's happening near me?" AI area digest (read aloud) ----
+  const [digestOpen, setDigestOpen] = useState(false)
+  const digestCenter = userPos ?? view.center
+  const openDigest = useCallback(() => { setDigestOpen(true) }, [])
+  const closeDigest = useCallback(() => { setDigestOpen(false) }, [])
+  const digestPickCategory = useCallback((c: Category) => { setFilter(new Set([c])); setDigestOpen(false) }, [])
+  const digestOpenPin = useCallback((id: string) => { setDigestOpen(false); navRef.current('/pin/' + id) }, [])
+  const digestReport = useCallback(() => { setDigestOpen(false); navRef.current('/report?mode=voice') }, [])
+  const showDigestButton = !isReport && !selectedId
+
   return (
     <div className={clsx('awaaz-map-page relative h-dvh w-full overflow-hidden bg-slate-200', LOW_END && 'awaaz-lite')}>
       {/* ---------- map (Leaflet + OpenStreetMap, no key) ---------- */}
-      <BaseMap className="absolute inset-0 z-0" onMoveEnd={onMoveEnd}>
-        <InvalidateOnResize />
-        <MapBridge onMap={setGmap} />
-        <ClusterLayer items={markerItems} onSelect={onSelect} />
-        {geo.fix && (
-          <Marker
-            position={[geo.fix.lat, geo.fix.lng]}
-            icon={userDotIcon}
-            interactive={false}
-            keyboard={false}
-            zIndexOffset={200000}
-            title={t('map.youAreHere')}
-          />
-        )}
-      </BaseMap>
+      <Suspense fallback={<MapPlaceholder />}>
+        <MapCanvas
+          pins={visiblePins}
+          selectedId={selectedId}
+          highlighted={highlighted}
+          lowEnd={LOW_END}
+          fix={geo.fix}
+          youAreHere={t('map.youAreHere')}
+          onSelect={onSelect}
+          onMoveEnd={onMoveEnd}
+          onMap={setGmap}
+        />
+      </Suspense>
 
       {/* ---------- top: header + filter chips; SOS (start) · status · voice help (end) ---------- */}
       <AppHeader floating />
@@ -315,10 +334,16 @@ export default function MapPage() {
               </div>
             )}
           </div>
-          {/* "what is this screen?" — speaks mapIntro in the user's language */}
-          <span data-awaaz-coach-keep="" className="pointer-events-auto mt-1.5 inline-flex">
-            <VoiceGuide prompt="mapIntro" size={48} label={false} />
-          </span>
+          <div className="flex shrink-0 flex-col items-center gap-3">
+            {/* "what is this screen?" — speaks mapIntro in the user's language */}
+            <span data-awaaz-coach-keep="" className="pointer-events-auto mt-1.5 inline-flex">
+              <VoiceGuide prompt="mapIntro" size={48} label={false} />
+            </span>
+            {/* NEARBY_DIGEST_HOOK button: top end side — away from SOS (start), the chips, locate and the mic (bottom) */}
+            {showDigestButton && (
+              <DigestButton onOpen={openDigest} pins={allPins} center={digestCenter} className="pointer-events-auto" />
+            )}
+          </div>
         </div>
       </div>
 
@@ -348,7 +373,21 @@ export default function MapPage() {
         </div>
       )}
 
-      {/* NEARBY_DIGEST_HOOK — phase 2: "what's happening near me" AI digest button (renders nothing yet) */}
+      {/* NEARBY_DIGEST_HOOK — "what's happening near me": AI digest sheet (button is in the top-end column) */}
+      {digestOpen && showDigestButton && (
+        <Suspense fallback={null}>
+          <DigestSheet
+            onClose={closeDigest}
+            pins={allPins}
+            userFix={geo.fix}
+            locate={locate}
+            mapCenter={view.center}
+            onPickCategory={digestPickCategory}
+            onOpenPin={digestOpenPin}
+            onReport={digestReport}
+          />
+        </Suspense>
+      )}
 
       <ActionBar
         onVoice={goVoice}
@@ -376,7 +415,9 @@ export default function MapPage() {
         </Suspense>
       )}
       {selectedId && (
-        <PinSheet clusterId={selectedId} pin={selectedPin} onClose={closeToMap} userLocation={userPos} />
+        <Suspense fallback={null}>
+          <PinSheet clusterId={selectedId} pin={selectedPin} onClose={closeToMap} userLocation={userPos} />
+        </Suspense>
       )}
     </div>
   )

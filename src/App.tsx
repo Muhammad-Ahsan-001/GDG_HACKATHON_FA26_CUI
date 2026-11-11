@@ -1,20 +1,34 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { loadMapCanvas } from './components/map/loadMapCanvas'
 import { onboardingSeen } from './components/onboarding/progress'
 import { PwaLayer } from './components/pwa/PwaLayer'
 import { Spinner } from './components/ui'
 import { AuthProvider, homeFor, isProfileOnboarded, useAuth } from './hooks/useAuth'
-import { I18nProvider } from './lib/i18n'
+import { I18nProvider, loadNamespaces, type LazyNamespace } from './lib/i18n'
 import type { Role } from './lib/types'
 
-const Landing = lazy(() => import('./pages/Landing'))
-const Login = lazy(() => import('./pages/Login'))
-const Onboarding = lazy(() => import('./pages/Onboarding'))
-const MapPage = lazy(() => import('./pages/MapPage'))
-const MePage = lazy(() => import('./pages/MePage'))
-const Dashboard = lazy(() => import('./pages/Dashboard'))
-const OrgRegister = lazy(() => import('./pages/OrgRegister'))
-const Admin = lazy(() => import('./pages/Admin'))
+/**
+ * A lazy page whose area strings (lazy i18n namespaces) download in parallel with its chunk, so it never renders
+ * raw keys. A failed strings chunk is not fatal: translate() retries it and the page re-renders when it arrives.
+ */
+function lazyPage<P extends object>(load: () => Promise<{ default: ComponentType<P> }>, ...ns: LazyNamespace[]) {
+  if (ns.length === 0) return lazy(load)
+  return lazy(() => Promise.all([load(), loadNamespaces(...ns).catch(() => undefined)]).then(([m]) => m))
+}
+
+const Landing = lazyPage(() => import('./pages/Landing'), 'landing')
+const Login = lazyPage(() => import('./pages/Login'), 'auth')
+const Onboarding = lazyPage(() => import('./pages/Onboarding'), 'onboarding')
+// the Leaflet canvas chunk starts downloading together with the map page (no waterfall); the shell paints first
+const MapPage = lazy(() => {
+  void loadMapCanvas().catch(() => undefined)
+  return import('./pages/MapPage')
+})
+const MePage = lazyPage(() => import('./pages/MePage'), 'auth')
+const Dashboard = lazyPage(() => import('./pages/Dashboard'), 'dashboard')
+const OrgRegister = lazyPage(() => import('./pages/OrgRegister'), 'auth')
+const Admin = lazyPage(() => import('./pages/Admin'), 'admin', 'auth')
 const SosPage = lazy(() => import('./pages/SosPage'))
 
 function FullScreenSpinner() {

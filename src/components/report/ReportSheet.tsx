@@ -1,7 +1,7 @@
 import './report.css'
 import clsx from 'clsx'
 import {
-  Camera, CircleAlert, CloudAlert, CloudOff, Images, Loader2, LogIn, Megaphone, PencilLine, RotateCcw, ShieldAlert,
+  Camera, CircleAlert, CloudAlert, CloudOff, CloudUpload, Images, Loader2, LogIn, Megaphone, PencilLine, RotateCcw, ShieldAlert,
   WifiOff, type LucideIcon,
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -11,8 +11,10 @@ import { api, ApiError } from '../../lib/api'
 import type { AttributeMap, ChatTurn, IntakeDraft, QuickReply, UserUrgency } from '../../lib/attributes'
 import { translate, useI18n } from '../../lib/i18n'
 import { MAX_PHOTOS, MediaUploadError, newClientId, uploadImage, uploadVoiceTurn } from '../../lib/media'
+import { enqueue, useOfflineQueue, watchQueued, type QueueInput } from '../../lib/offlineQueue'
 import type { ProcessReportRequest, ProcessReportResponse } from '../../lib/types'
 import { VOICE_PROMPTS, buzz, playPrompt, playUrl, stopVoice, type VoicePromptId } from '../../lib/voice/player'
+import { useOnline } from '../pwa/OfflineBanner'
 import { Sheet } from '../ui'
 import { VoiceGuide } from '../voice/VoiceGuide'
 import { ChatThread, bubbleKey } from './ChatThread'
@@ -25,18 +27,28 @@ import {
 import { KnowCard, UrgencyPicker } from './KnowCard'
 import { LocationChip, type LocKind } from './LocationChip'
 import { LocationStep, type PickedLoc } from './LocationStep'
+import { OfflineCapture, QueuedCard, type OfflineLoc, type OfflineReason } from './OfflineCapture'
 import { ProgressSteps, type StepKey } from './ProgressSteps'
 import { ResultCard } from './ResultCard'
 import { usePhotoDraft, type DraftPhoto } from './usePhotoDraft'
 
 type Phase =
   | { kind: 'chat' }
-  | { kind: 'location' }
+  | { kind: 'location'; back: 'chat' | 'offline' }
   | { kind: 'submitting'; steps: StepKey[]; active: number }
   | { kind: 'result'; res: ProcessReportResponse; attributes: AttributeMap }
   | { kind: 'rejected'; rejected: NonNullable<ProcessReportResponse['rejected']> }
   | { kind: 'needs_location'; hints: string[] }
-  | { kind: 'error'; error: ErrKind; detail?: string }
+  | { kind: 'error'; error: ErrKind; detail?: string; note?: string; canQueue?: boolean }
+  /** Phase 2: no connection (or the AI is down) — simple capture without the AI conversation, saved to the queue */
+  | { kind: 'offline' }
+  /** saved in the offline queue; turns into the normal result once the queue places it */
+  | { kind: 'queued'; clientId: string; emergency: boolean; attributes: AttributeMap }
+
+/** Location fields of a queued report (always a point: GPS, chosen spot or the map centre). */
+type QueueLoc = Pick<ProcessReportRequest, 'lat' | 'lng' | 'accuracy_m' | 'location_source' | 'address_text'>
+
+const backPhase = (b: 'chat' | 'offline'): Phase => (b === 'offline' ? { kind: 'offline' } : { kind: 'chat' })
 
 /** One user turn before it is sent to report-chat (kept for retries). */
 type TurnInput =
@@ -106,6 +118,15 @@ export function ReportSheet(props: {
   const [hint, setHint] = useState<Hint | null>(null)
   const [textOpen, setTextOpen] = useState(mode === 'text')
   const [text, setText] = useState('')
+  // ---- offline capture (Phase 2)
+  const online = useOnline()
+  const queue = useOfflineQueue()
+  const [offlineReason, setOfflineReason] = useState<OfflineReason>('offline')
+  const [carried, setCarried] = useState(false)
+  const [clip, setClip] = useState<{ take: TakeResult; url: string } | null>(null)
+  const [offlineText, setOfflineText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // ---- refs: the source of truth inside async flows ----
   const sessionRef = useRef(newClientId())
@@ -143,6 +164,14 @@ export function ReportSheet(props: {
   const photosRef = useRef<DraftPhoto[]>(photos.photos)
   const geoRef = useRef(geo)
   const recStateRef = useRef(rec.state)
+  const clipRef = useRef<{ take: TakeResult; url: string } | null>(null)
+  const offlineTextRef = useRef('')
+  const savingRef = useRef(false)
+  /** consecutive report-chat server failures (2 => offer the offline capture: the AI is down) */
+  const serverFails = useRef(0)
+  const offlinePrompted = useRef(false)
+  /** the last submit's idempotency key + location, for "save for later" after it failed in transit */
+  const lastSubmit = useRef<{ clientId: string; loc: QueueLoc } | null>(null)
 
   useLayoutEffect(() => {
     phaseRef.current = phase
@@ -300,7 +329,220 @@ export function ReportSheet(props: {
     setPicked(null)
     setHint(null)
     setText('')
+    setClipTake(null)
+    offlineTextRef.current = ''
+    setOfflineText('')
+    setSaveError(null)
+    setCarried(false)
+    serverFails.current = 0
+    offlinePrompted.current = false
+    lastSubmit.current = null
   }
+
+  // ---------------------------------------------------------------- offline capture + queue (Phase 2)
+  const setClipTake = (take: TakeResult | null) => {
+    const prev = clipRef.current
+    if (prev) { stopVoice(); URL.revokeObjectURL(prev.url) }
+    const next = take ? { take, url: URL.createObjectURL(take.blob) } : null
+    clipRef.current = next
+    setClip(next)
+  }
+
+  /** Everything captured so far as one queue item (blobs that never reached Storage are uploaded at flush time). */
+  const buildQueueItem = (clientId: string, loc: QueueLoc, extra: { clip?: TakeResult | null; text?: string } = {}): QueueInput => {
+    const conversation = history.current
+    const userTexts = conversation.filter((c) => c.role === 'user').map((c) => c.text.trim()).filter(Boolean)
+    const d = direct.current?.input
+    if (d?.kind === 'text') userTexts.push(d.text)
+    const typed = extra.text?.trim()
+    if (typed && typed.length >= MIN_TEXT) userTexts.push(typed)
+    const attrs = attrsRef.current
+    const directVoice = d?.kind === 'voice' ? d : null
+    const newTake = extra.clip ?? (directVoice && !directVoice.path ? directVoice.take : null)
+    const audio_path = !extra.clip && directVoice?.path ? directVoice.path : undefined
+    // process-report transcribes `audio_path` only without a conversation: a new voice note next to an intake
+    // conversation goes as voice + the conversation's words as text (+ attributes) instead
+    const useConversation = conversation.length > 0 && !newTake && !audio_path
+    const imagePaths: string[] = []
+    const imageBlobs: Blob[] = []
+    for (const ph of photosRef.current) {
+      const path = photoDone.current.get(ph.id)
+      if (path) imagePaths.push(path)
+      else imageBlobs.push(ph.blob)
+    }
+    const knownAudio = [...audioPaths.current, ...(audio_path ? [audio_path] : [])]
+    const category = asCategory(draftRef.current?.category)
+    const landmark = attrs.landmark?.value_en?.trim()
+    return {
+      client_id: clientId,
+      created_at: new Date().toISOString(),
+      ui_language: lang,
+      text: userTexts.join('\n') || undefined,
+      ...(newTake ? { audio: { blob: newTake.blob, mime: newTake.mime } } : {}),
+      audio_path,
+      audio_paths: knownAudio.length ? knownAudio : undefined,
+      images: imageBlobs.length ? imageBlobs : undefined,
+      image_paths: imagePaths.length ? imagePaths : undefined,
+      conversation: useConversation ? conversation : undefined,
+      attributes: Object.keys(attrs).length ? attrs : undefined,
+      user_urgency: urgencyRef.current ?? undefined,
+      intake_session_id: sessionRef.current,
+      category_hint: category && category !== 'other' ? category : undefined,
+      ...loc,
+      address_text: loc.address_text || landmark || undefined,
+    }
+  }
+
+  /** Chosen spot > GPS (waits briefly while it is still locating) > the map centre. */
+  const resolveQueueLoc = async (): Promise<QueueLoc> => {
+    const chosen = pickedRef.current
+    if (chosen) {
+      return {
+        lat: chosen.lat, lng: chosen.lng, location_source: chosen.source, address_text: chosen.label,
+        ...(chosen.accuracy ? { accuracy_m: Math.round(chosen.accuracy) } : {}),
+      }
+    }
+    const g = geoRef.current
+    let fix: GeoFix | null = g.state === 'ok' ? g.fix : null
+    if (!fix && g.state === 'locating' && locatePromise.current) {
+      fix = await Promise.race([locatePromise.current, sleep(GPS_WAIT_MS).then(() => null)])
+    }
+    if (fix) return { lat: fix.lat, lng: fix.lng, accuracy_m: Math.round(fix.accuracy), location_source: 'gps' }
+    return { lat: mapCenter.lat, lng: mapCenter.lng, location_source: 'map' }
+  }
+
+  const finishQueued = (clientId: string) => {
+    const emergency = urgencyRef.current === 'emergency'
+    const snapshot = attrsRef.current
+    newSession()
+    const next: Phase = { kind: 'queued', clientId, emergency, attributes: snapshot }
+    phaseRef.current = next
+    setPhase(next)
+    void playPrompt('offlineQueued', lang)
+    buzz([40, 60, 120])
+  }
+
+  /** Save the whole draft (conversation, voice, photos) for later, with the same client_id as the failed submit. */
+  const queueDraft = async (c: { clientId: string; loc: QueueLoc }, kind: ErrKind): Promise<boolean> => {
+    const loc: QueueLoc = c.loc.lat === undefined ? { ...c.loc, lat: mapCenter.lat, lng: mapCenter.lng, location_source: 'map' } : c.loc
+    try {
+      await enqueue(buildQueueItem(c.clientId, loc))
+      finishQueued(c.clientId)
+      return true
+    } catch {
+      setPhase({ kind: 'error', error: kind, note: t('alerts.offline_storageOff'), canQueue: false })
+      void playPrompt('tryAgain', lang)
+      return false
+    }
+  }
+
+  /** Switch to the simple capture. A failed turn's voice / text (and an unsent emergency take) move into it. */
+  const enterOffline = (reason: OfflineReason, carry?: TurnInput, failedId?: string) => {
+    if (phaseRef.current.kind === 'offline') return
+    stopVoice()
+    stopStepTimer()
+    countdownRef.current = false
+    setCountdown(false)
+    submitAfterTurn.current = false
+    setSendQueued(false)
+    emergencyPending.current = false
+    const d = direct.current
+    if (d) {
+      direct.current = null
+      setMsgs((prev) => prev.filter((m) => m.id !== d.id))
+      carry ??= d.input
+    }
+    if (failedId) {
+      failedTurns.current.delete(failedId)
+      setMsgs((prev) => prev.filter((m) => m.id !== failedId))
+    }
+    if (carry?.kind === 'voice') setClipTake(carry.take)
+    else if (carry?.kind === 'text') {
+      const v = offlineTextRef.current || carry.text
+      offlineTextRef.current = v
+      setOfflineText(v)
+    }
+    setCarried(hasUserTurn())
+    setOfflineReason(reason)
+    setHint(null)
+    setSaveError(null)
+    const next: Phase = { kind: 'offline' }
+    phaseRef.current = next
+    setPhase(next)
+    buzz([40, 60, 40])
+    if (!offlinePrompted.current && openRef.current) {
+      offlinePrompted.current = true
+      void playPrompt('reportVoice', lang)
+    }
+  }
+  const enterOfflineStable = useStable(enterOffline)
+
+  /** A finished take in the offline capture: same silence checks as the conversation, then it becomes the voice note. */
+  const onOfflineTake = (r: TakeResult | null) => {
+    if (!r) { notice('tryAgain'); return }
+    const verdict = classifyTake(r, { minVoicedMs: urgencyRef.current === 'emergency' ? EMERGENCY_MIN_VOICED_MS : undefined })
+    if (verdict === 'silent') { notice('noSpeech'); return }
+    if (verdict === 'too_short') { notice('tooShort'); return }
+    setHint(null)
+    setSaveError(null)
+    setClipTake(r)
+    buzz(25)
+  }
+
+  const onSaveOffline = useStable(async () => {
+    if (savingRef.current) return
+    if (recStateRef.current === 'recording') onTake(await finishTake()) // one tap: finish the take and save it
+    const typed = offlineTextRef.current.trim()
+    const has = Boolean(clipRef.current) || photosRef.current.length > 0 || typed.length >= MIN_TEXT || hasUserTurn()
+    if (!has) {
+      setSaveError(t('alerts.offline_needSomething'))
+      buzz([60, 80, 60])
+      return
+    }
+    savingRef.current = true
+    setSaving(true)
+    setSaveError(null)
+    stopVoice()
+    try {
+      const loc = await resolveQueueLoc()
+      const clientId = newClientId()
+      await enqueue(buildQueueItem(clientId, loc, { clip: clipRef.current?.take, text: typed }))
+      finishQueued(clientId)
+    } catch {
+      setSaveError(t('alerts.offline_saveFailed'))
+      buzz([60, 80, 60])
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  })
+
+  /** Back online in the capture: what was recorded / written becomes the first turn of the AI conversation. */
+  const onTalkToAi = useStable(() => {
+    const c = clipRef.current
+    const typed = offlineTextRef.current.trim()
+    if (c) URL.revokeObjectURL(c.url) // the blob itself stays valid for the upload
+    clipRef.current = null
+    setClip(null)
+    offlineTextRef.current = ''
+    setOfflineText('')
+    serverFails.current = 0
+    const next: Phase = { kind: 'chat' }
+    phaseRef.current = next
+    setPhase(next)
+    if (c) void sendTurn({ kind: 'voice', take: c.take })
+    else if (typed.length >= MIN_TEXT) void sendTurn({ kind: 'text', text: typed })
+  })
+
+  const onRemoveClip = useStable(() => setClipTake(null))
+  const onOfflineText = useStable((v: string) => { offlineTextRef.current = v; setOfflineText(v); setSaveError(null) })
+  const onOfflineUrgency = useStable((u: UserUrgency) => { setUrgency(u); buzz(25) })
+  const onOfflineLocate = useStable(() => {
+    pickedRef.current = null
+    setPicked(null)
+    draftVersion.current++
+    void relocate()
+  })
 
   // ---------------------------------------------------------------- countdown (emergency)
   const startCountdown = () => {
@@ -362,6 +604,7 @@ export function ReportSheet(props: {
       })
       if (sessionRef.current !== sid) return
       failedTurns.current.delete(id)
+      serverFails.current = 0
 
       if (res.no_speech) {
         updateMsg(id, { status: 'unheard' })
@@ -421,12 +664,17 @@ export function ReportSheet(props: {
       }
       if ((res.emergency || urgencyRef.current === 'emergency') && !countdownCancelled.current) startCountdown()
       if (aiId) speak(aiId, res.reply_audio_url)
-    } catch {
+    } catch (e) {
       if (sessionRef.current !== sid) return
+      const kind = classifyError(e)
       failedTurns.current.set(id, input)
       updateMsg(id, { status: 'failed' })
       setQuick(prevQuick)
       if (submitAfterTurn.current) { submitAfterTurn.current = false; setSendQueued(false) }
+      // no connection: keep what they said and switch to the simple capture (saved, sent when online)
+      if (kind === 'offline' || kind === 'network') { enterOffline(kind, input, id); return }
+      // the AI keeps failing (e.g. provider down): same simple capture, the queue keeps retrying
+      if (kind === 'server' && ++serverFails.current >= 2) { enterOffline('server', input, id); return }
       notice('tryAgain')
     } finally {
       if (sessionRef.current === sid) {
@@ -460,6 +708,7 @@ export function ReportSheet(props: {
   // ---------------------------------------------------------------- voice
   const onTake = (r: TakeResult | null, opts: { emergency?: boolean } = {}) => {
     resetRecorder() // the take now lives in the turn
+    if (phaseRef.current.kind === 'offline') { onOfflineTake(r); return }
     const thenSubmit = submitAfterTurn.current
     const giveUpSubmit = () => {
       if (!thenSubmit) return
@@ -587,6 +836,7 @@ export function ReportSheet(props: {
     const steps: StepKey[] = ['upload', ...(directVoice ? (['listen'] as const) : []), 'understand', 'duplicates', 'pin']
     setPhase({ kind: 'submitting', steps, active: 0 })
     void playPrompt('reportSending', lang)
+    let ctx: { clientId: string; loc: QueueLoc } | null = null
 
     try {
       // --- location: chosen spot > GPS > let the server geocode what was said (it answers needs_location if it can't)
@@ -613,6 +863,8 @@ export function ReportSheet(props: {
       const version = draftVersion.current
       const clientId = attempt.current?.version === version ? attempt.current.clientId : newClientId()
       attempt.current = { clientId, version }
+      ctx = { clientId, loc: { ...loc, address_text: chosen?.label } }
+      lastSubmit.current = ctx
 
       if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new MediaUploadError('network', 'offline')
 
@@ -680,10 +932,11 @@ export function ReportSheet(props: {
         return
       }
       const kind = classifyError(e)
-      // OFFLINE_QUEUE_HOOK: Phase 2 — when kind is 'offline' | 'network', enqueue
-      // { client_id: attempt.current.clientId, SubmitRequest fields, voice-turn blobs not yet uploaded, photo blobs }
-      // to IndexedDB (src/lib/offlineQueue.ts) and replay on reconnect / Background Sync instead of only offering retry.
-      setPhase({ kind: 'error', error: kind, detail: e instanceof Error ? e.message : undefined })
+      // OFFLINE_QUEUE_HOOK (Phase 2, wired): offline => save the whole draft to the IndexedDB queue right away
+      // (same client_id; replayed on reconnect / Background Sync). Network / server / upload failures offer
+      // "Save — send automatically" next to Try again.
+      if (kind === 'offline' && ctx) { await queueDraft(ctx, kind); return }
+      setPhase({ kind: 'error', error: kind, detail: e instanceof Error ? e.message : undefined, canQueue: kind !== 'auth' && ctx !== null })
       void playPrompt('tryAgain', lang)
     } finally {
       busy.current = false
@@ -695,7 +948,7 @@ export function ReportSheet(props: {
   const openLocation = useStable(() => {
     if (recStateRef.current === 'recording') return
     stopVoice()
-    setPhase({ kind: 'location' })
+    setPhase({ kind: 'location', back: phaseRef.current.kind === 'offline' ? 'offline' : 'chat' })
   })
 
   const choosePoint = (p: PickedLoc) => {
@@ -740,7 +993,9 @@ export function ReportSheet(props: {
       if (resultSeen.current) setPhase({ kind: 'chat' }) // the session was already reset when it succeeded
       else resultSeen.current = true // finished while the sheet was closed: show it now
     }
-    if (phaseRef.current.kind === 'location') setPhase({ kind: 'chat' })
+    const cur = phaseRef.current
+    if (cur.kind === 'location') setPhase(backPhase(cur.back))
+    if (cur.kind === 'queued') setPhase({ kind: 'chat' }) // the queue / banner carries on from here
     if (!pickedRef.current) void relocate()
     if (recStateRef.current === 'unsupported') setHint({ prompt: 'micDenied', tone: 'info' })
   })
@@ -778,7 +1033,38 @@ export function ReportSheet(props: {
     return () => clearTimeout(id)
   }, [hint])
 
-  useEffect(() => () => stopStepTimer(), [])
+  useEffect(() => () => {
+    stopStepTimer()
+    if (clipRef.current) URL.revokeObjectURL(clipRef.current.url)
+  }, [])
+
+  // no connection while the conversation is idle: switch to the simple offline capture
+  useEffect(() => {
+    if (!open || online || phase.kind !== 'chat') return
+    if (recStateRef.current === 'recording' || thinkingRef.current || busy.current || countdownRef.current) return
+    enterOfflineStable('offline')
+  }, [open, online, phase.kind, enterOfflineStable])
+
+  // back online with nothing captured yet: straight back to the AI conversation
+  useEffect(() => {
+    if (!open || !online || phase.kind !== 'offline' || offlineReason !== 'offline') return
+    if (clipRef.current || photosRef.current.length || offlineTextRef.current.trim() || recStateRef.current === 'recording') return
+    const next: Phase = { kind: 'chat' }
+    phaseRef.current = next
+    setPhase(next)
+  }, [open, online, phase.kind, offlineReason])
+
+  // the "saved" card is on screen: no toast for it, and speak the outcome when the queue sends it
+  const queuedId = phase.kind === 'queued' ? phase.clientId : null
+  const queuedOutcome = queuedId ? queue.outcomes[queuedId] : undefined
+  useEffect(() => (open && queuedId ? watchQueued(queuedId) : undefined), [open, queuedId])
+  const outcomeKind = queuedOutcome?.kind
+  useEffect(() => {
+    if (!outcomeKind || !openRef.current) return
+    void playPrompt(outcomeKind === 'placed' ? 'reportDone' : outcomeKind === 'rejected' ? 'notIssue' : 'tryAgain', lang)
+    buzz(outcomeKind === 'placed' ? [60, 60, 120] : [60, 80, 60])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outcomeKind])
 
   // ---------------------------------------------------------------- render
   const canSend = phase.kind === 'chat' && (
@@ -789,6 +1075,10 @@ export function ReportSheet(props: {
   const locKind: LocKind = picked ? 'picked' : geo.state === 'locating' ? 'locating' : geoFix ? 'gps' : 'none'
   const userLoc = useMemo(() => (geoFix ? { lat: geoFix.lat, lng: geoFix.lng } : null), [geoFix])
   const roomForPhotos = photos.photos.length < photos.max
+  const offLoc: OfflineLoc = picked ? { kind: 'picked', label: picked.label }
+    : geo.state === 'locating' ? { kind: 'locating' }
+      : geoFix ? { kind: 'gps', accuracy: geoFix.accuracy } : { kind: 'map' }
+  const canSaveOffline = Boolean(clip) || photos.photos.length > 0 || offlineText.trim().length >= MIN_TEXT || carried
   const showPhotoCard = phase.kind === 'chat' && photoWanted && firstTurn && roomForPhotos
   const showPhotoAsk = phase.kind === 'chat' && askPhoto && !firstTurn && roomForPhotos
 
@@ -819,8 +1109,9 @@ export function ReportSheet(props: {
     )
   }, [showPhotoCard, photos.busy, photos.error, photoWanted, openCamera, openGallery, t])
 
-  const guidePrompt: VoicePromptId | null = phase.kind === 'chat'
+  const guidePrompt: VoicePromptId | null = phase.kind === 'chat' || phase.kind === 'offline'
     ? (micBlocked ? 'micDenied' : 'reportVoice')
+    : phase.kind === 'queued' ? (outcomeKind === 'placed' ? 'reportDone' : 'offlineQueued')
     : phase.kind === 'result' ? 'reportDone'
       : phase.kind === 'rejected' ? (phase.rejected.reason === 'no_speech' ? 'noSpeech' : 'notIssue')
         : phase.kind === 'error' ? 'tryAgain' : null
@@ -896,10 +1187,65 @@ export function ReportSheet(props: {
           initial={locationInitial()}
           userLocation={userLoc}
           onLocate={relocate}
-          onBack={() => setPhase({ kind: 'chat' })}
-          onUse={(p) => { choosePoint(p); setPhase({ kind: 'chat' }) }}
+          onBack={() => setPhase(backPhase(phase.back))}
+          onUse={(p) => { choosePoint(p); setPhase(backPhase(phase.back)) }}
         />
       )}
+
+      {phase.kind === 'offline' && (
+        <OfflineCapture
+          reason={offlineReason}
+          online={online}
+          carried={carried}
+          preferWrite={textOpen}
+          rec={rec}
+          micBlocked={micBlocked}
+          clip={clip ? { url: clip.url, durationMs: clip.take.durationMs } : null}
+          onMic={onMic}
+          onCancelRec={onCancelRec}
+          onRemoveClip={onRemoveClip}
+          photos={photos.photos}
+          photoBusy={photos.busy}
+          photoError={photos.error ? (photos.error === 'too_large' ? t('report.photoTooLarge') : t('report.photoDecodeError')) : null}
+          roomForPhotos={roomForPhotos}
+          onCamera={openCamera}
+          onGallery={openGallery}
+          onRemovePhoto={onRemovePhoto}
+          urgency={userUrgency}
+          onUrgency={onOfflineUrgency}
+          text={offlineText}
+          onText={onOfflineText}
+          loc={offLoc}
+          onLocate={onOfflineLocate}
+          onChooseMap={openLocation}
+          hint={hint}
+          onDismissHint={() => setHint(null)}
+          saving={saving}
+          saveError={saveError}
+          canSave={canSaveOffline}
+          onSave={onSaveOffline}
+          onTalkToAi={onTalkToAi}
+        />
+      )}
+
+      {phase.kind === 'queued' && (queuedOutcome?.kind === 'placed'
+        ? wrap(
+          <ResultCard
+            res={queuedOutcome.res}
+            attributes={phase.attributes}
+            onSeeMap={() => onDone(queuedOutcome.res)}
+            onNew={() => { setPhase({ kind: 'chat' }); applyMode(mode) }}
+          />,
+        )
+        : wrap(
+          <QueuedCard
+            clientId={phase.clientId}
+            emergency={phase.emergency}
+            outcome={queuedOutcome}
+            onNew={() => { setPhase({ kind: 'chat' }); applyMode(mode) }}
+            onClose={onClose}
+          />,
+        ))}
 
       {phase.kind === 'needs_location' && (
         <LocationStep
@@ -933,7 +1279,17 @@ export function ReportSheet(props: {
       )}
 
       {phase.kind === 'error' && wrap(
-        <ErrorScreen kind={phase.error} detail={phase.detail} onRetry={() => { void submit() }} onEdit={() => setPhase({ kind: 'chat' })} />,
+        <ErrorScreen
+          kind={phase.error}
+          detail={phase.detail}
+          note={phase.note}
+          onRetry={() => { void submit() }}
+          onEdit={() => setPhase({ kind: 'chat' })}
+          onSaveLater={phase.canQueue ? () => {
+            const c = lastSubmit.current
+            if (c) void queueDraft(c, phase.error)
+          } : undefined}
+        />,
       )}
     </Sheet>
   )
@@ -1035,7 +1391,9 @@ function SecondaryButton({ icon: Icon, onClick, children }: { icon?: LucideIcon;
   )
 }
 
-function ErrorScreen({ kind, detail, onRetry, onEdit }: { kind: ErrKind; detail?: string; onRetry: () => void; onEdit: () => void }) {
+function ErrorScreen({ kind, detail, note, onRetry, onEdit, onSaveLater }: {
+  kind: ErrKind; detail?: string; note?: string; onRetry: () => void; onEdit: () => void; onSaveLater?: () => void
+}) {
   const { t } = useI18n()
   const view: Record<ErrKind, { icon: LucideIcon; tone: keyof typeof TONES; title: string; body: string }> = {
     offline: { icon: WifiOff, tone: 'slate', title: t('report.offlineTitle'), body: t('report.offlineBody') },
@@ -1047,8 +1405,13 @@ function ErrorScreen({ kind, detail, onRetry, onEdit }: { kind: ErrKind; detail?
   const v = view[kind]
   return (
     <StatusScreen icon={v.icon} tone={v.tone} title={v.title} body={v.body}>
+      {note && <p className="rounded-2xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">{note}</p>}
       {kind === 'server' && detail && <p className="font-latin break-words text-xs text-slate-400" dir="auto">{detail}</p>}
-      {kind !== 'auth' && <PrimaryButton icon={RotateCcw} onClick={onRetry}>{t('common.retry')}</PrimaryButton>}
+      {/* Phase 2: the report goes to the offline queue (same client_id) and is sent automatically */}
+      {onSaveLater && <PrimaryButton icon={CloudUpload} onClick={onSaveLater}>{t('alerts.offline_saveLater')}</PrimaryButton>}
+      {kind !== 'auth' && (onSaveLater
+        ? <SecondaryButton icon={RotateCcw} onClick={onRetry}>{t('alerts.offline_retryNow')}</SecondaryButton>
+        : <PrimaryButton icon={RotateCcw} onClick={onRetry}>{t('common.retry')}</PrimaryButton>)}
       <SecondaryButton icon={PencilLine} onClick={onEdit}>{t('report.editReport')}</SecondaryButton>
     </StatusScreen>
   )

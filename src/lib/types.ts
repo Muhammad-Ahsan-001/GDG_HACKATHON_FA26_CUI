@@ -225,4 +225,6 @@ export interface DigestResponse {
   pin_count: number
   /** false for the "all quiet" message and the fixed-wording fallback (show <AiLabel/> only when true) */
   ai?: boolean
+  /** the digest read aloud in the requested ui_language (omitted when TTS failed / was slow: fall back to api.tts) */
+  audio_url?: string
 }

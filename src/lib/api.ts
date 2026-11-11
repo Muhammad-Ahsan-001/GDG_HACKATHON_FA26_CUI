@@ -63,9 +63,11 @@ export const api = {
   assignmentAction: (assignment_id: string, action: 'claim' | 'start' | 'resolve', note?: string) =>
     callFunction<AssignmentActionResponse>('assignment-action', { assignment_id, action, note }),
   tts: (text: string, lang: Lang) => callFunction<{ url: string; cached: boolean }>('tts', { text, lang }),
-  digestNearby: (lat: number, lng: number, radius_m = 3000) =>
-    callFunction<DigestResponse>('digest', { mode: 'nearby', lat, lng, radius_m }),
-  digestDaily: (org_id?: string) => callFunction<DigestResponse>('digest', { mode: 'daily', org_id }),
+  /** `ui_language` (optional) also returns `audio_url`: the digest read aloud in that language. */
+  digestNearby: (lat: number, lng: number, radius_m = 3000, ui_language?: Lang) =>
+    callFunction<DigestResponse>('digest', { mode: 'nearby', lat, lng, radius_m, ui_language }),
+  digestDaily: (org_id?: string, ui_language?: Lang) =>
+    callFunction<DigestResponse>('digest', { mode: 'daily', org_id, ui_language }),
 
   // ---- RPCs ----
   async setMyRole(role: Exclude<Role, 'admin'>) {

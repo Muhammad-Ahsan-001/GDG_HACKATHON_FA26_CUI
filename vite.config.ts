@@ -6,11 +6,14 @@ import { VitePWA } from 'vite-plugin-pwa'
 // Vendor chunk groups (Rolldown `output.codeSplitting`). A group also captures its modules' dependencies
 // (includeDependenciesRecursively), so the startup groups (react, supabase) get the highest priority — otherwise
 // e.g. react would be pulled into the leaflet chunk and leaflet would load on first paint.
-// firebase / leaflet stay lazy: only lazily-imported chunks reference them.
+// firebase / leaflet / motion stay lazy: only lazily-imported chunks reference them (the citizen map's Leaflet
+// canvas is its own chunk, see src/components/map/loadMapCanvas.ts; area i18n namespaces load per page).
 const VENDOR_GROUPS: { name: string; test: RegExp; priority: number }[] = [
   { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|cookie|set-cookie-parser)[\\/]/, priority: 40 },
   { name: 'supabase', test: /node_modules[\\/](@supabase|tslib|isows)[\\/]/, priority: 30 },
   { name: 'leaflet', test: /node_modules[\\/](leaflet|leaflet\.markercluster|react-leaflet|@react-leaflet)[\\/]/, priority: 20 },
+  // landing / admin animations only (lazy): without this group the chunk is named after `motion/react`
+  { name: 'motion', test: /node_modules[\\/](motion|framer-motion|motion-dom|motion-utils)[\\/]/, priority: 15 },
   { name: 'firebase', test: /node_modules[\\/](firebase|@firebase|idb)[\\/]/, priority: 10 },
 ]
 

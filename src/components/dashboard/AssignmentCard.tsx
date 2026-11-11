@@ -1,53 +1,24 @@
 import clsx from 'clsx'
 import {
-  CheckCheck, Clock, Hand, Hourglass, Loader2, MapPin, Navigation, Play, Building2, TriangleAlert, type LucideIcon,
+  CheckCheck, Clock, Hand, Loader2, MapPin, Navigation, Play, Building2, TriangleAlert, type LucideIcon,
 } from 'lucide-react'
 import { memo, type CSSProperties } from 'react'
 import { CATEGORY_META } from '../../lib/categories'
 import { useI18n } from '../../lib/i18n'
 import { ASSIGNMENT_META, STATUS_META } from '../../lib/status'
 import type { AssignmentStatus } from '../../lib/types'
+import { FoodLine } from '../food/FoodPanel'
 import { UserUrgencyBadge } from '../map/UserUrgencyBadge'
 import { AttributeChips } from '../report/AttributeChips'
 import { AiLabel, CategoryIcon, StatusBadge, UrgencyBadge, useTimeAgo } from '../ui'
 import type { AssignmentActionKind, DashAssignment } from './types'
-import { directionsUrl, formatCountdown, formatDuration, formatKm, useNow } from './utils'
+import { directionsUrl, formatDuration, formatKm, useNow } from './utils'
 
 /** "5 min ago", re-rendered by a shared 30 s ticker. */
 export function TimeAgo({ iso, className }: { iso: string | null | undefined; className?: string }) {
   useNow(30_000)
   const ago = useTimeAgo()
   return <span className={className}>{ago(iso)}</span>
-}
-
-/** Food: servings + live countdown to safe_until. */
-function FoodLine({ a }: { a: DashAssignment }) {
-  const { t } = useI18n()
-  const until = a.safe_until ? new Date(a.safe_until).getTime() : null
-  const now = useNow(1000, until !== null && a.status !== 'resolved')
-  const left = until !== null ? until - now : null
-  const expired = left !== null && left <= 0
-  const color = left === null ? '#475569' : expired || left < 30 * 60_000 ? '#DC2626' : left < 60 * 60_000 ? '#B45309' : '#15803D'
-  const FoodIcon = CATEGORY_META.food.icon
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-      {a.food_servings != null && (
-        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold"
-          style={{ background: CATEGORY_META.food.soft, color: CATEGORY_META.food.color }}>
-          <FoodIcon className="size-4" />
-          {t('dashboard.servings', { n: a.food_servings })}
-          {a.food_type ? <span className="font-normal">· {a.food_type}</span> : null}
-        </span>
-      )}
-      {left !== null && a.status !== 'resolved' && (
-        <span className="inline-flex items-center gap-1 rounded-full border-2 px-2 py-0.5 font-bold" style={{ borderColor: color, color }}
-          role="timer" aria-live="off">
-          <Hourglass className="size-4" />
-          {expired ? t('dashboard.foodExpired') : t('dashboard.safeFor', { time: formatCountdown(left, t) })}
-        </span>
-      )}
-    </div>
-  )
 }
 
 const NEXT_ACTION: Record<Exclude<AssignmentStatus, 'resolved'>, { action: AssignmentActionKind; icon: LucideIcon; key: string; to: AssignmentStatus }> = {
@@ -149,7 +120,16 @@ function AssignmentCardImpl({ a, selected, highlighted, pending, showOrg, onSele
             )}
           </div>
 
-          {isFood && <FoodLine a={a} />}
+          {/* food rescue: servings + live safe-to-eat countdown (green → amber → red → Expired) */}
+          {isFood && (
+            <FoodLine
+              servings={a.food_servings}
+              foodType={a.food_type}
+              safeUntil={a.safe_until}
+              showCountdown={a.status !== 'resolved'}
+              className="mt-2"
+            />
+          )}
         </div>
 
         {a.photo_url && !selected && (
