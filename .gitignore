@@ -20,3 +20,5 @@ logs
 .vercel
 .env*
 !.env.example
+*firebase-adminsdk*.json
+*service-account*.json
