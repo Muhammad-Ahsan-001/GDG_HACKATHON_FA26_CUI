@@ -1,42 +1,26 @@
-/* Map-only animations. Transform/opacity only so they stay on the compositor (cheap phones). */
+/* Citizen map page only. Transform/opacity animations only, so they stay on the compositor (cheap phones). */
 
-@keyframes awaaz-pulse {
-  0% { transform: scale(1); opacity: 0.5; }
-  100% { transform: scale(2.1); opacity: 0; }
-}
-.awaaz-pin-pulse {
-  animation: awaaz-pulse 1.8s ease-out infinite;
-  will-change: transform, opacity;
-}
-
-/* Newly arrived / changed pin: a short bounce + an expanding ring */
-@keyframes awaaz-pop {
-  0%, 100% { transform: scale(1); }
-  30% { transform: scale(1.45); }
-  60% { transform: scale(0.92); }
-  80% { transform: scale(1.1); }
-}
-.awaaz-pin-pop { animation: awaaz-pop 0.9s ease-out 2; }
-
-@keyframes awaaz-flash {
-  0% { transform: scale(1); opacity: 0.85; }
-  100% { transform: scale(2.8); opacity: 0; }
-}
-.awaaz-pin-flash { animation: awaaz-flash 1.2s ease-out 3 forwards; }
-
-/* Primary mic button: soft breathing ring */
+/* Primary mic button: two staggered breathing rings */
 @keyframes awaaz-mic-ring {
   0% { transform: scale(1); opacity: 0.45; }
-  70%, 100% { transform: scale(1.45); opacity: 0; }
+  70%, 100% { transform: scale(1.5); opacity: 0; }
 }
-.awaaz-mic-ring { animation: awaaz-mic-ring 2.4s ease-out infinite; }
+.awaaz-mic-ring { animation: awaaz-mic-ring 2.4s ease-out infinite; will-change: transform, opacity; }
+.awaaz-mic-ring-2 { animation-delay: 1.2s; }
 
-/* "You are here" halo */
-@keyframes awaaz-halo {
-  0% { transform: scale(0.6); opacity: 0.6; }
-  100% { transform: scale(1.6); opacity: 0; }
+/* First-run coach mark around the mic */
+@keyframes awaaz-coach-ring {
+  0% { transform: scale(0.92); opacity: 1; }
+  100% { transform: scale(1.55); opacity: 0; }
 }
-.awaaz-user-halo { animation: awaaz-halo 2.2s ease-out infinite; }
+.awaaz-coach-ring { animation: awaaz-coach-ring 1.4s ease-out infinite; will-change: transform, opacity; }
+.awaaz-coach-ring-2 { animation-delay: 0.7s; }
+
+@keyframes awaaz-coach-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(7px); }
+}
+.awaaz-coach-arrow { animation: awaaz-coach-bounce 0.9s ease-in-out infinite; }
 
 /* Live indicator dot */
 @keyframes awaaz-blink {
@@ -48,12 +32,26 @@
 .awaaz-no-scrollbar { scrollbar-width: none; }
 .awaaz-no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* Low-end devices: replace the per-pin infinite pulse with a static halo */
-.awaaz-lite .awaaz-pin-pulse { animation: none; transform: scale(1.45); opacity: 0.22; }
-.awaaz-lite .awaaz-user-halo { animation: none; transform: scale(1.3); opacity: 0.25; }
+/* OSM attribution: always visible (licence requirement) but small, tucked into the bottom corner,
+   below the action bar's bottom padding so it never sits under a button. */
+.awaaz-map-page .leaflet-control-attribution {
+  margin: 0;
+  padding: 1px 6px;
+  font-size: 9.5px;
+  line-height: 1.45;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.78);
+  border-top-left-radius: 6px;
+}
+.awaaz-map-page .leaflet-control-attribution a { color: #0f766e; }
+
+/* Low-end devices: one ring is enough */
+.awaaz-lite .awaaz-mic-ring-2,
+.awaaz-lite .awaaz-coach-ring-2 { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .awaaz-pin-pulse, .awaaz-user-halo { animation: none; transform: scale(1.4); opacity: 0.22; }
-  .awaaz-mic-ring, .awaaz-pin-pop, .awaaz-pin-flash, .awaaz-live-dot { animation: none; }
-  .awaaz-pin-flash { opacity: 0; }
+  .awaaz-mic-ring, .awaaz-live-dot, .awaaz-coach-arrow { animation: none; }
+  .awaaz-mic-ring { opacity: 0; }
+  .awaaz-coach-ring { animation: none; transform: scale(1.1); opacity: 0.9; }
+  .awaaz-coach-ring-2 { display: none; }
 }

@@ -43,6 +43,32 @@
 .awaaz-dash-scroll { scrollbar-width: none; }
 .awaaz-dash-scroll::-webkit-scrollbar { display: none; }
 
+/* SOS map marker (colour comes from the --sos variable set in DashboardMap.tsx) */
+.awz-sos-pin { position: relative; width: var(--s); height: var(--s); }
+.awz-sos-body {
+  position: absolute; inset: 4px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 9999px; background: var(--sos);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.45);
+}
+.awz-sos-ring {
+  position: absolute; inset: 0; border-radius: 9999px;
+  background: var(--sos); opacity: 0;
+  animation: awaaz-dash-ping 1.4s ease-out infinite;
+  will-change: transform, opacity;
+}
+.awz-sos-ring-2 { animation-delay: 0.7s; }
+.awz-sos-tag {
+  position: absolute; left: 50%; bottom: -10px; transform: translateX(-50%);
+  padding: 0 6px; border-radius: 9999px;
+  background: #fff; color: var(--sos);
+  font: 900 11px/16px Inter, sans-serif; letter-spacing: 0.06em;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
+}
+.awz-sos-quiet .awz-sos-ring { display: none; }
+.awz-sos-quiet .awz-sos-body { opacity: 0.7; }
+
 @media (prefers-reduced-motion: reduce) {
-  .awaaz-dash-new, .awaaz-dash-blink, .awaaz-dash-ping, .awaaz-dash-toast { animation: none; }
+  .awaaz-dash-new, .awaaz-dash-blink, .awaaz-dash-ping, .awaaz-dash-toast, .awz-sos-ring { animation: none; }
 }

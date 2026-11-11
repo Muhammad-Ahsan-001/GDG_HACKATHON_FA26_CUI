@@ -1,6 +1,9 @@
 // POST /process-report — the core pipeline: voice / photo / text -> AI extraction -> location -> duplicate
 // clustering -> verification -> responder routing -> nearby alerts. See docs/CONTRACT.md §2 "process-report".
-import { checkPhoto, embed, extractReport, sameIncident, transcribe } from '../_shared/ai.ts'
+// Phase 1b (docs/CONTRACT-1B.md): also accepts the AI intake conversation (no re-transcription), attributes,
+// the citizen's own urgency choice, the intake session id and every voice turn (audio_paths). Silence -> 200 rejected.
+import { checkPhoto, detectNoSpeech, embed, extractReport, sameIncident, transcribe } from '../_shared/ai.ts'
+import { type AttributeMap, type ReportAttribute, sanitizeAttributes, type UserUrgency } from '../_shared/attributes.ts'
 import {
   DUP_GRAY_ZONE_MIN,
   DUP_RADIUS_M,
@@ -34,6 +37,9 @@ const MAX_IMAGE_BYTES = 6 * 1024 * 1024
 const MAX_AUDIO_BYTES = 24 * 1024 * 1024
 const MAX_TEXT = 4000
 const SAME_INCIDENT_CANDIDATES = 2
+const MAX_TURNS = 24
+const MAX_TURN_TEXT = 1500
+const MAX_AUDIO_PATHS = 12
 
 const REJECTED_MESSAGE = {
   message_en: 'This does not look like a report of a local problem, so it was not added to the map. ' +
@@ -42,7 +48,28 @@ const REJECTED_MESSAGE = {
     'اگر یہ اصل مسئلہ ہے تو براہ کرم دوبارہ بتائیں۔',
 }
 
+const NO_SPEECH_MESSAGE = {
+  message_en: 'We could not hear anything in the voice note. Please hold the mic button and speak again, ' +
+    'or type it, or send a photo.',
+  message_ur: 'آواز میں کچھ سنائی نہیں دیا۔ براہ کرم مائیک کا بٹن دبا کر دوبارہ بولیں، یا لکھ کر بتائیں، یا تصویر بھیجیں۔',
+}
+
+const TOO_SHORT_MESSAGE = {
+  message_en: 'We heard only a word or two. Please say a little more: what is the problem, and where is it?',
+  message_ur: 'ہمیں صرف ایک دو لفظ سنائی دیے۔ براہ کرم تھوڑا اور بتائیں: مسئلہ کیا ہے اور کہاں ہے؟',
+}
+
 // ------------------------------------------------------------------------------------------- helpers
+
+/** One turn of the AI intake conversation (server mirror of ChatTurn in src/lib/attributes.ts). */
+interface ChatTurn {
+  role: 'user' | 'ai'
+  text: string
+  text_alt?: string
+  at: string
+  audio_path?: string
+  audio_url?: string
+}
 
 interface Body {
   client_id: string
@@ -56,10 +83,73 @@ interface Body {
   language: 'ur' | 'en' | 'pa' | 'auto'
   ui_language: Lang
   category_hint: Category | undefined
+  // Phase 1b
+  conversation: ChatTurn[] | null
+  attributes: AttributeMap
+  user_urgency: UserUrgency | null
+  intake_session_id: string | null
+  /** every voice file of this report (audio_path + audio_paths + conversation turns), de-duplicated */
+  all_audio_paths: string[]
 }
+
+const USER_URGENCIES: UserUrgency[] = ['emergency', 'urgent', 'can_wait']
 
 const str = (v: unknown, max = 10_000): string => (typeof v === 'string' ? v.trim().slice(0, max) : '')
 const safePath = (p: string) => p.length > 2 && p.length < 400 && !p.includes('..') && !p.startsWith('/') && !p.includes('\\')
+
+function ownAudioPath(raw: unknown, userId: string, field: string): string | null {
+  const p = str(raw, 400)
+  if (!p) return null
+  if (!safePath(p)) throw new HttpError(400, `Invalid ${field}`, 'bad_request')
+  // report-audio is private: a caller may only submit audio from their own folder ({auth.uid()}/...)
+  if (!p.startsWith(`${userId}/`)) throw new HttpError(403, `${field} must be inside your own folder`, 'forbidden')
+  return p
+}
+
+function parseConversation(raw: unknown, userId: string): ChatTurn[] | null {
+  if (!Array.isArray(raw)) return null
+  const out: ChatTurn[] = []
+  for (const item of raw.slice(-MAX_TURNS)) {
+    if (!item || typeof item !== 'object') continue
+    const t = item as Record<string, unknown>
+    const role = t.role === 'ai' ? 'ai' : t.role === 'user' ? 'user' : null
+    if (!role) continue
+    const text = str(t.text, MAX_TURN_TEXT).replace(/\s+/g, ' ')
+    const at = str(t.at, 40)
+    const turn: ChatTurn = { role, text, at: at && !Number.isNaN(Date.parse(at)) ? at : new Date().toISOString() }
+    const alt = str(t.text_alt, MAX_TURN_TEXT)
+    if (role === 'ai' && alt) turn.text_alt = alt
+    if (role === 'user') {
+      const p = str(t.audio_path, 400)
+      // a turn's audio outside the caller's folder is dropped (never trusted), not fatal
+      if (p && safePath(p) && p.startsWith(`${userId}/`)) turn.audio_path = p
+    } else {
+      const u = str(t.audio_url, 600)
+      if (/^https:\/\//.test(u)) turn.audio_url = u
+    }
+    if (!turn.text && !turn.audio_path) continue
+    out.push(turn)
+  }
+  return out.length ? out : null
+}
+
+function parseUserUrgency(v: unknown, attrs: AttributeMap): UserUrgency | null {
+  const s = str(v, 20).toLowerCase()
+  if ((USER_URGENCIES as string[]).includes(s)) return s as UserUrgency
+  // fall back to the user_urgency attribute the intake filled in (value may be "emergency" or "Emergency")
+  const a = attrs.user_urgency
+  const val = `${a?.value_en ?? ''}`.toLowerCase()
+  if (/emergen/.test(val)) return 'emergency'
+  if (/urgent/.test(val)) return 'urgent'
+  if (/wait|can_wait|later/.test(val)) return 'can_wait'
+  return null
+}
+
+const USER_URGENCY_ATTR: Record<UserUrgency, { en: string; ur: string; severity: ReportAttribute['severity'] }> = {
+  emergency: { en: 'Emergency', ur: 'ایمرجنسی', severity: 'danger' },
+  urgent: { en: 'Urgent', ur: 'فوری', severity: 'warn' },
+  can_wait: { en: 'Can wait', ur: 'انتظار ہو سکتا ہے', severity: 'info' },
+}
 
 function validate(raw: unknown, userId: string): Body {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new HttpError(400, 'Body must be a JSON object', 'bad_request')
@@ -68,16 +158,31 @@ function validate(raw: unknown, userId: string): Body {
   if (!client_id) throw new HttpError(400, 'client_id is required', 'bad_request')
 
   const text = str(b.text, MAX_TEXT)
-  const audio_path: string | null = str(b.audio_path, 400) || null
-  if (audio_path) {
-    if (!safePath(audio_path)) throw new HttpError(400, 'Invalid audio_path', 'bad_request')
-    // report-audio is private: a caller may only submit audio from their own folder ({auth.uid()}/...)
-    if (!audio_path.startsWith(`${userId}/`)) throw new HttpError(403, 'audio_path must be inside your own folder', 'forbidden')
-  }
   const image_paths = Array.isArray(b.image_paths)
     ? [...new Set(b.image_paths.map((p) => str(p, 400)).filter((p) => p && safePath(p)))].slice(0, MAX_IMAGES)
     : []
-  if (!text && !audio_path && !image_paths.length) {
+  const extraAudio = Array.isArray(b.audio_paths)
+    ? b.audio_paths.slice(0, MAX_AUDIO_PATHS).map((p) => ownAudioPath(p, userId, 'audio_paths')).filter((p): p is string => !!p)
+    : []
+  const conversation = parseConversation(b.conversation, userId)
+  // without a conversation, a lone audio_paths entry is THE voice note (transcribed like audio_path)
+  const audio_path = ownAudioPath(b.audio_path, userId, 'audio_path') ?? (conversation ? null : extraAudio[0] ?? null)
+  const attributes = sanitizeAttributes(b.attributes)
+  const user_urgency = parseUserUrgency(b.user_urgency, attributes)
+  if (user_urgency && !attributes.user_urgency) {
+    const m = USER_URGENCY_ATTR[user_urgency]
+    attributes.user_urgency = {
+      key: 'user_urgency', label_en: 'How urgent', label_ur: 'کتنا ضروری', value_en: m.en, value_ur: m.ur,
+      icon: 'siren', severity: m.severity, source: 'user',
+    }
+  }
+  const all_audio_paths = [...new Set([
+    ...(audio_path ? [audio_path] : []),
+    ...extraAudio,
+    ...(conversation ?? []).map((t) => t.audio_path).filter((p): p is string => !!p),
+  ])].slice(0, MAX_AUDIO_PATHS)
+  const hasConversationContent = Boolean(conversation?.some((t) => t.role === 'user'))
+  if (!text && !audio_path && !image_paths.length && !hasConversationContent && !extraAudio.length) {
     throw new HttpError(400, 'Send a voice note, a photo or some text', 'empty_report')
   }
 
@@ -103,7 +208,136 @@ function validate(raw: unknown, userId: string): Body {
     language,
     ui_language,
     category_hint: CATEGORIES.includes(hint) ? hint : undefined,
+    conversation,
+    attributes,
+    user_urgency,
+    intake_session_id: str(b.intake_session_id, 100) || null,
+    all_audio_paths,
   }
+}
+
+// ------------------------------------------------------------------------------------------- silence detection
+// Same rules as report-chat (ai.ts detectNoSpeech): markers, STT hallucinations on silent audio ("Thank you for
+// watching", lone "شکریہ"), greetings and fillers do not count as words.
+
+/** The transcript (whitespace-normalised), or '' when it holds fewer than minWords real words. */
+function heardWords(raw: string, minWords: number): string {
+  const t = raw.replace(/\s+/g, ' ').trim()
+  if (!t) return ''
+  return detectNoSpeech(t, { minWords }).no_speech ? '' : t
+}
+
+// ------------------------------------------------------------------------------------------- intake text
+
+const URG_FLOOR: Record<UserUrgency, Urgency> = { emergency: 'high', urgent: 'medium', can_wait: 'low' }
+const URG_NOMINAL: Record<UserUrgency, Urgency> = { emergency: 'critical', urgent: 'high', can_wait: 'low' }
+
+function factLines(attrs: AttributeMap, userUrgency: UserUrgency | null): string[] {
+  const lines = Object.values(attrs)
+    .filter((a) => a.key !== 'user_urgency' && a.value_en)
+    .map((a) => `${a.key}: ${a.value_en}${a.value_ur && a.value_ur !== a.value_en ? ` (${a.value_ur})` : ''}`)
+  if (userUrgency) {
+    const say = userUrgency === 'emergency' ? 'EMERGENCY (danger right now)' : userUrgency === 'urgent' ? 'urgent' : 'can wait'
+    lines.push(`citizen's own urgency choice: ${say}`)
+  }
+  return lines
+}
+
+interface IntakeInput {
+  /** extraction input (conversation + typed text + facts) */
+  text: string
+  /** the citizen's own words joined (stored as reports.transcript, returned as "what we heard") */
+  heard: string
+  voiceTurns: number
+  typedTurns: number
+  userTurns: number
+}
+
+function buildIntake(body: Body): IntakeInput {
+  const conv = body.conversation ?? []
+  const lines: string[] = []
+  const heard: string[] = []
+  let voiceTurns = 0
+  let typedTurns = 0
+  for (const t of conv) {
+    if (t.role === 'ai') {
+      if (t.text) lines.push(`Assistant: ${t.text}`)
+      continue
+    }
+    // voice turns: drop pure silence / hallucinations (a one-word answer such as "haan" is fine)
+    const words = t.audio_path ? heardWords(t.text, 1) : t.text
+    if (!words) continue
+    lines.push(`Citizen${t.audio_path ? ' (voice)' : ''}: ${words}`)
+    heard.push(words)
+    if (t.audio_path) voiceTurns++
+    else typedTurns++
+  }
+  if (body.text && !heard.some((h) => h === body.text)) {
+    lines.push(`Citizen (typed): ${body.text}`)
+    heard.push(body.text)
+    typedTurns++
+  }
+  const facts = factLines(body.attributes, body.user_urgency)
+  const userTurns = voiceTurns + typedTurns
+  if (!userTurns && !facts.length) return { text: '', heard: '', voiceTurns, typedTurns, userTurns }
+  const text = [
+    'This report came from a short conversation between the citizen and the Awaaz intake assistant.',
+    'Only "Citizen" lines are the citizen\'s own words (voice lines are speech-to-text and may be noisy); ' +
+    '"Assistant" lines are the questions that were asked, for context only. Decide "language" from the Citizen lines only.',
+    ...lines,
+    ...(facts.length ? ['Facts confirmed during the conversation (key: value):', ...facts] : []),
+  ].join('\n')
+  return { text, heard: heard.join('\n'), voiceTurns, typedTurns, userTurns }
+}
+
+// ------------------------------------------------------------------------------------------- food servings
+
+const ARABIC_INDIC_DIGITS = /[٠-٩۰-۹]/g
+
+function normalizeDigits(s: string): string {
+  return s.replace(ARABIC_INDIC_DIGITS, (d) => {
+    const c = d.charCodeAt(0)
+    return String(c >= 0x06f0 ? c - 0x06f0 : c - 0x0660)
+  })
+}
+
+const PEOPLE_WORDS = 'people|persons?|servings?|portions?|guests?|plates?|log|logon|logo|logoon|logaon|afraad|afrad|' +
+  'aadmi|admi|bande|banday|bandon|mehman|mehmaan|mehmano|children|kids|bachay|bachon|bache|bachchon|' +
+  'افراد|لوگ|لوگوں|آدمی|بندے|بندوں|مہمان|مہمانوں|پلیٹ|پلیٹیں|بچے|بچوں'
+const STATED_SERVINGS_RES = [
+  new RegExp(`(\\d{1,6})\\s*(?:\\+|plus)?\\s*(?:(?:-|to|se|سے)\\s*\\d{1,6}\\s*)?(?:${PEOPLE_WORDS})(?![\\p{L}])`, 'giu'),
+  /\bfor\s+(?:about\s+|around\s+|approx(?:imately|\.)?\s+|roughly\s+|nearly\s+)?(\d{1,6})\b(?!\s*(?:hours?|hrs?|days?|minutes?|mins?|weeks?|months?|years?|am|pm|o'?clock|ghant|din|baje|bje|km|m\b|kg|rupees|rs))/gi,
+  /(\d{1,6})\s*(?:ke\s+liye|ke\s+liay|kay\s+liye|ke\s+lie|کے\s+لیے|کے\s+لئے|ka\s+khana|ka\s+khaana|کا\s+کھانا)/giu,
+]
+
+/** Every serving count the reporter stated in words (text / transcript / attributes). */
+function statedServings(texts: string[], attrs: AttributeMap): number[] {
+  const nums: number[] = []
+  for (const a of Object.values(attrs)) {
+    if (!/serving|people_fed|portion|feeds|food_quantity|quantity/.test(a.key)) continue
+    const m = normalizeDigits(`${a.value_en} ${a.value_ur}`).match(/\d{1,6}/)
+    if (m) nums.push(Number(m[0]))
+  }
+  for (const raw of texts) {
+    if (!raw) continue
+    const s = normalizeDigits(raw)
+    for (const re of STATED_SERVINGS_RES) {
+      re.lastIndex = 0
+      for (const m of s.matchAll(re)) nums.push(Number(m[1]))
+    }
+  }
+  return nums.filter((n) => Number.isFinite(n) && n >= 1 && n <= 100000)
+}
+
+/** Stated numbers beat the photo estimate; the AI's reading wins when it equals one of them (or their sum). */
+function pickStatedServings(stated: number[], aiServings: number | null | undefined): number | null {
+  if (!stated.length) return null
+  const ai = Number(aiServings)
+  if (Number.isFinite(ai) && ai > 0) {
+    const sum = [...new Set(stated)].reduce((s, n) => s + n, 0)
+    if (stated.includes(ai) || ai === sum) return ai
+  }
+  return stated[0]
 }
 
 function toBase64(bytes: Uint8Array): string {
@@ -192,10 +426,42 @@ function basicExtraction(words: string, hint: Category | undefined, uiLang: Lang
   }
 }
 
+/** Silence / too-short voice note: HTTP 200, nothing stored; the client plays noSpeech / tooShort and stays on the mic. */
+function noSpeechResult(heard: string, tooShort: boolean): Result {
+  return {
+    report_id: '',
+    cluster_id: null,
+    is_duplicate: false,
+    similarity: null,
+    status: 'unconfirmed',
+    confidence: 0,
+    category: 'other',
+    urgency: 'low',
+    title_en: '',
+    title_ur: '',
+    summary_en: '',
+    summary_ur: '',
+    ai_reason: null,
+    routed: [],
+    ai_provider: 'openai',
+    transcript: heard || undefined,
+    food: null,
+    rejected: { reason: 'no_speech', ...(tooShort ? TOO_SHORT_MESSAGE : NO_SPEECH_MESSAGE) },
+  }
+}
+
 // ------------------------------------------------------------------------------------------- stored result (idempotency)
 
 const REPORT_RESULT_COLS = 'id, cluster_id, category, urgency, status, confidence, ai_reason, title_en, title_ur, ' +
-  'summary_en, summary_ur, transcript, is_spam, spam_reason, ai_provider, food_servings, food_type, safe_until, extraction'
+  'summary_en, summary_ur, transcript, is_spam, spam_reason, ai_provider, food_servings, food_type, safe_until, extraction, ' +
+  'attributes, user_urgency'
+
+/** process-report response (contract shape) + Phase-1b additions. */
+type Result = ProcessReportResponse & {
+  attributes?: AttributeMap
+  user_urgency?: UserUrgency | null
+  location?: { lat: number; lng: number; source: string; label?: string }
+}
 
 interface StoredReport {
   id: string
@@ -217,10 +483,12 @@ interface StoredReport {
   food_type: string | null
   safe_until: string | null
   extraction: { _pipeline?: { similarity?: number | null } } | null
+  attributes: AttributeMap | null
+  user_urgency: UserUrgency | null
 }
 
-async function storedResult(r: StoredReport): Promise<ProcessReportResponse> {
-  const base: ProcessReportResponse = {
+async function storedResult(r: StoredReport): Promise<Result> {
+  const base: Result = {
     report_id: r.id,
     cluster_id: r.cluster_id,
     is_duplicate: false,
@@ -240,6 +508,8 @@ async function storedResult(r: StoredReport): Promise<ProcessReportResponse> {
     food: r.category === 'food' && r.safe_until
       ? { servings: r.food_servings ?? 0, safe_until: r.safe_until, food_type: r.food_type ?? '' }
       : null,
+    attributes: r.attributes ?? {},
+    user_urgency: r.user_urgency ?? null,
   }
   if (r.is_spam || !r.cluster_id) {
     return { ...base, cluster_id: null, rejected: { reason: r.spam_reason ?? 'not a local civic issue', ...REJECTED_MESSAGE } }
@@ -284,8 +554,10 @@ serve(async (req) => {
     return json(await storedResult(prior))
   }
 
-  // ---- 1. media: audio -> transcript, images -> data URLs (in parallel)
-  const audioP = body.audio_path
+  // ---- 1. media: audio -> transcript, images -> data URLs (in parallel).
+  // With an intake conversation every voice turn was already transcribed by report-chat: never re-transcribe.
+  const intake = body.conversation ? buildIntake(body) : null
+  const audioP = body.audio_path && !intake
     ? T.run('audio', async () => {
       const { data: blob, error } = await admin.storage.from('report-audio').download(body.audio_path!)
       if (error || !blob) throw new Error(`audio download failed: ${error?.message ?? 'no data'}`)
@@ -319,15 +591,26 @@ serve(async (req) => {
 
   const [audioRes, images] = await Promise.all([audioP, imagesP])
   const transcription = audioRes && !('error' in audioRes) ? audioRes : null
-  const transcript = transcription?.text?.trim() ?? ''
+  const rawTranscript = transcription?.text?.trim() ?? ''
   const imageUrls = images.map((i) => i.url)
-  const hasWords = Boolean(body.text || transcript)
+  const facts = factLines(body.attributes, body.user_urgency)
+  // silence / STT hallucination on silent audio => no words. A voice note on its own needs >= 2 real words;
+  // next to typed text or a photo any real word is kept.
+  const speech = detectNoSpeech(rawTranscript, { minWords: 2 })
+  const transcript = heardWords(rawTranscript, body.text || imageUrls.length ? 1 : 2)
+  const heard = intake ? intake.heard : transcript
+  const hasWords = intake ? Boolean(intake.text) : Boolean(body.text || transcript)
 
   if (!hasWords && !imageUrls.length) {
     if (audioRes && 'error' in audioRes) {
       throw new HttpError(502, 'Could not process the voice note. Please try again or type it.', 'transcription_failed')
     }
-    if (transcription) throw new HttpError(422, 'No speech was heard in the voice note', 'no_speech')
+    if (transcription || intake || (!body.text && !body.image_paths.length)) {
+      // never create a report from silence: friendly 200 so the client speaks a prompt and lets them retry
+      const tooShort = !intake && speech.reason === 'too_short'
+      console.log(`[process-report] ${body.client_id} no_speech ${speech.reason ?? ''} (heard: ${JSON.stringify(rawTranscript.slice(0, 80))}) total ${T.total()}ms`)
+      return json(noSpeechResult(tooShort ? rawTranscript : '', tooShort))
+    }
     throw new HttpError(422, 'The photos could not be read. Please send them again.', 'media_unavailable')
   }
 
@@ -338,11 +621,15 @@ serve(async (req) => {
   let visionMeta: AiMeta | null = null
   let extractFallback = false
   if (hasWords) {
+    // conversation: one structured block (citizen turns + AI questions + facts); else text (+ facts) and transcript
+    const extractText = intake
+      ? intake.text
+      : [body.text, ...(facts.length ? ['Facts given by the citizen (key: value):', ...facts] : [])].filter(Boolean).join('\n')
     try {
       const r = await T.run('extract', () =>
         extractReport({
-          text: body.text || undefined,
-          transcript: transcript || undefined,
+          text: extractText || undefined,
+          transcript: intake ? undefined : transcript || undefined,
           uiLanguage: body.ui_language,
           addressText: body.address_text || undefined,
           categoryHint: body.category_hint,
@@ -351,7 +638,8 @@ serve(async (req) => {
       extractMeta = r.meta
     } catch (e) {
       console.error('[process-report] extraction failed, basic fallback:', errMsg(e))
-      extraction = basicExtraction([transcript, body.text].filter(Boolean).join(' '), body.category_hint, body.ui_language)
+      extraction = basicExtraction(intake ? intake.heard.replace(/\n/g, ' ') : [transcript, body.text].filter(Boolean).join(' '),
+        body.category_hint, body.ui_language)
       extractFallback = true
     }
   } else {
@@ -367,9 +655,11 @@ serve(async (req) => {
         ? `Photo-only report (the citizen sent no words). An AI vision check describes the photo as: "${photo.notes}" ` +
           `(visible severity: ${photo.severity}${photo.food_type ? `; food: ${photo.food_type}, about ${photo.servings_estimate ?? '?'} servings` : ''}).`
         : undefined
+      const withFacts = [described, ...(facts.length ? ['Facts given by the citizen (key: value):', ...facts] : [])]
+        .filter(Boolean).join('\n')
       const r = await T.run('extract', () =>
         extractReport({
-          text: described,
+          text: withFacts || undefined,
           uiLanguage: body.ui_language,
           addressText: body.address_text || undefined,
           categoryHint: body.category_hint,
@@ -387,14 +677,28 @@ serve(async (req) => {
   const aiProvider = (extractMeta?.provider ?? (extractFallback ? 'none' : 'openai')) as Provider
 
   const inputModes: string[] = []
-  if (transcription) inputModes.push('voice')
+  const audioCount = body.all_audio_paths.length
+  const usedVoice = intake ? intake.voiceTurns > 0 || audioCount > 0 : Boolean(transcript)
+  // intake turns not tagged with their audio (client sent audio_paths separately) count as voice
+  const usedText = intake ? (intake.voiceTurns > 0 || !audioCount ? intake.typedTurns > 0 : Boolean(body.text)) : Boolean(body.text)
+  if (usedVoice) inputModes.push('voice')
   if (images.length) inputModes.push('photo')
-  if (body.text) inputModes.push('text')
+  if (usedText) inputModes.push('text')
   const mediaRows = (reportId: string) => [
-    ...(body.audio_path ? [{ report_id: reportId, type: 'audio', storage_path: body.audio_path, bucket: 'report-audio' }] : []),
+    ...body.all_audio_paths.map((p) => ({ report_id: reportId, type: 'audio', storage_path: p, bucket: 'report-audio' })),
     ...images.map((i) => ({ report_id: reportId, type: 'image', storage_path: i.path, bucket: 'report-images' })),
   ]
-  const transcriptOut = transcript || undefined
+  const transcriptOut = heard || undefined
+  // Phase-1b columns shared by both inserts
+  const intakeCols = {
+    attributes: body.attributes,
+    conversation: body.conversation,
+    user_urgency: body.user_urgency,
+    intake_session_id: body.intake_session_id,
+  }
+  const intakeMeta = intake
+    ? { turns: body.conversation?.length ?? 0, user_turns: intake.userTurns, voice_turns: intake.voiceTurns, session: body.intake_session_id }
+    : null
 
   // ---- 3. spam: store (no cluster), tell the user kindly
   if (extraction.is_spam) {
@@ -410,7 +714,7 @@ serve(async (req) => {
       summary_en: extraction.summary_en,
       summary_ur: extraction.summary_ur,
       canonical_en: extraction.canonical_en,
-      transcript: transcript || null,
+      transcript: heard || null,
       language: extraction.language,
       input_modes: inputModes,
       location: pointWkt(p.lat, p.lng),
@@ -422,8 +726,9 @@ serve(async (req) => {
       is_spam: true,
       spam_reason: extraction.spam_reason ?? 'not a local civic issue',
       photo_check: photo,
-      extraction: { ...extraction, _pipeline: { timings_ms: T.timings, extract_model: extractMeta?.model } },
+      extraction: { ...extraction, _pipeline: { timings_ms: T.timings, extract_model: extractMeta?.model, intake: intakeMeta } },
       ai_provider: aiProvider,
+      ...intakeCols,
     }).select('id').single()
     if (error) {
       if (error.code === '23505') {
@@ -439,7 +744,7 @@ serve(async (req) => {
       if (mErr) console.warn('[process-report] media insert failed', mErr.message)
     }
     console.log(`[process-report] ${body.client_id} rejected as spam (${extraction.spam_reason}) total ${T.total()}ms`)
-    const res: ProcessReportResponse = {
+    const res: Result = {
       report_id: reportId,
       cluster_id: null,
       is_duplicate: false,
@@ -458,6 +763,8 @@ serve(async (req) => {
       transcript: transcriptOut,
       food: null,
       rejected: { reason: extraction.spam_reason ?? 'not a local civic issue', ...REJECTED_MESSAGE },
+      attributes: body.attributes,
+      user_urgency: body.user_urgency,
     }
     return json(res)
   }
@@ -503,12 +810,34 @@ serve(async (req) => {
   // photo evidence can raise urgency (never lower it)
   let urgency: Urgency = URGENCIES.includes(extraction.urgency) ? extraction.urgency : 'medium'
   if (photoCheck?.matches_claim && URGENCIES.includes(photoCheck.severity)) urgency = maxUrgency(urgency, photoCheck.severity)
+  // the citizen's own urgency is a floor one level below their choice (emergency => at least high); the AI may go higher
+  if (body.user_urgency) {
+    const floor = URG_FLOOR[body.user_urgency]
+    const nominal = URG_NOMINAL[body.user_urgency]
+    const before = urgency
+    urgency = maxUrgency(urgency, floor)
+    const notes: string[] = []
+    if (urgency !== before) notes.push(`urgency raised from ${before} to ${urgency}: citizen marked it "${body.user_urgency}"`)
+    if (URG_RANK[urgency] < URG_RANK[nominal]) {
+      notes.push(`citizen chose "${body.user_urgency}" but the AI assessed ${urgency} (kept within one level of the citizen's choice)`)
+    }
+    if (notes.length) {
+      extraction = { ...extraction, confidence_notes: [extraction.confidence_notes, ...notes].filter((s) => s && s !== 'clear').join('; ') }
+    }
+  }
 
   // food rescue fields
   // (only for food on offer — a "people need food" report has no servings / shelf life)
   const isFood = extraction.category === 'food' &&
     Boolean(extraction.food || photoCheck?.food_type || photoCheck?.servings_estimate)
-  const foodServings = isFood ? (photoCheck?.servings_estimate ?? extraction.food?.servings_estimate ?? null) : null
+  // a number the reporter stated (text / transcript / attributes) beats the photo estimate
+  const stated = isFood
+    ? statedServings([body.text, intake ? intake.heard : transcript], body.attributes)
+    : []
+  const statedPick = isFood ? pickStatedServings(stated, extraction.food?.servings_estimate) : null
+  const foodServings = isFood
+    ? (statedPick ?? photoCheck?.servings_estimate ?? extraction.food?.servings_estimate ?? null)
+    : null
   const foodType = isFood ? (extraction.food?.food_type || photoCheck?.food_type || null) : null
   const safeUntil = isFood
     ? new Date(Date.now() + (extraction.food?.safe_hours || FOOD_DEFAULT_SAFE_HOURS) * 3600_000).toISOString()
@@ -597,6 +926,8 @@ serve(async (req) => {
       food_type: foodType,
       safe_until: safeUntil,
       last_report_at: nowIso,
+      attributes: body.attributes,          // recompute_cluster re-merges from the reports
+      user_urgency: body.user_urgency,
     }).select('id').single()
     if (error) throw new Error(`cluster insert failed: ${error.message}`)
     clusterId = (c as { id: string }).id
@@ -615,7 +946,7 @@ serve(async (req) => {
     summary_en: extraction.summary_en,
     summary_ur: extraction.summary_ur,
     canonical_en: extraction.canonical_en,
-    transcript: transcript || null,
+    transcript: heard || null,
     language: extraction.language || transcription?.language || null,
     input_modes: inputModes,
     embedding: vecLiteral,
@@ -642,6 +973,8 @@ serve(async (req) => {
         embed_model: embedding?.model ?? null,
         accuracy_m: body.accuracy_m,
         geocode: geocoded ? { label: (geocoded as GeocodeResult).label, source: (geocoded as GeocodeResult).source, query: (geocoded as GeocodeResult).query } : null,
+        intake: intakeMeta,
+        food_servings_source: isFood ? (statedPick != null ? 'stated' : photoCheck?.servings_estimate != null ? 'photo' : 'ai') : null,
         timings_ms: T.timings,
       },
     },
@@ -649,6 +982,7 @@ serve(async (req) => {
     food_servings: foodServings,
     food_type: foodType,
     safe_until: safeUntil,
+    ...intakeCols,
   }).select('id').single()
   if (repErr) {
     if (createdCluster) await admin.from('clusters').delete().eq('id', clusterId)
@@ -702,7 +1036,7 @@ serve(async (req) => {
     })())
   }
 
-  const res: ProcessReportResponse & { location: { lat: number; lng: number; source: string; label?: string } } = {
+  const res: Result = {
     report_id: reportId,
     cluster_id: cid,
     is_duplicate: isDuplicate,
@@ -726,11 +1060,13 @@ serve(async (req) => {
       source: location.source,
       ...(geocoded ? { label: (geocoded as GeocodeResult).label } : {}),
     },
+    attributes: body.attributes,
+    user_urgency: body.user_urgency,
   }
   console.log(JSON.stringify({
     fn: 'process-report', client_id: body.client_id, report_id: reportId, cluster_id: cid, match: matchMethod,
     similarity, status: v.status, confidence: v.confidence, routed: routed.length, modes: inputModes,
-    timings_ms: T.timings, total_ms: T.total(),
+    intake: Boolean(intake), user_urgency: body.user_urgency, timings_ms: T.timings, total_ms: T.total(),
   }))
   return json(res)
 })

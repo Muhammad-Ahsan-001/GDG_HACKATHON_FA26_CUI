@@ -1,15 +1,20 @@
 import clsx from 'clsx'
-import { BellRing, CircleCheck, TriangleAlert, X } from 'lucide-react'
+import { BellRing, CircleCheck, Siren, TriangleAlert, X } from 'lucide-react'
 import { useEffect } from 'react'
 import { CATEGORY_META } from '../../lib/categories'
 import { useI18n } from '../../lib/i18n'
 import type { Category } from '../../lib/types'
 
 export type ToastItem =
-  | { id: string; kind: 'new'; assignmentId: string; category: Category; title_en: string | null; title_ur: string | null; more: number }
+  | {
+    id: string; kind: 'new'; assignmentId: string; category: Category; title_en: string | null; title_ur: string | null; more: number
+    /** women's-safety SOS alert: siren icon, SOS wording, stays longer */
+    sos?: boolean
+  }
   | { id: string; kind: 'ok' | 'error'; message: string }
 
 const LIFETIME: Record<ToastItem['kind'], number> = { new: 9000, ok: 3500, error: 6000 }
+const SOS_LIFETIME = 30_000
 
 /** In-page toast stack under the header ("New alert: …", action results). */
 export function AlertToasts({ toasts, onOpen, onDismiss }: {
@@ -29,9 +34,10 @@ export function AlertToasts({ toasts, onOpen, onDismiss }: {
 function Toast({ toast, onOpen, onDismiss }: { toast: ToastItem; onOpen: (id: string) => void; onDismiss: (id: string) => void }) {
   const { t, pick, lang } = useI18n()
   useEffect(() => {
-    const timer = window.setTimeout(() => onDismiss(toast.id), LIFETIME[toast.kind])
+    const ms = toast.kind === 'new' && toast.sos ? SOS_LIFETIME : LIFETIME[toast.kind]
+    const timer = window.setTimeout(() => onDismiss(toast.id), ms)
     return () => window.clearTimeout(timer)
-  }, [toast.id, toast.kind, onDismiss])
+  }, [toast, onDismiss])
 
   const close = (
     <button
@@ -49,18 +55,33 @@ function Toast({ toast, onOpen, onDismiss }: { toast: ToastItem; onOpen: (id: st
     const CatIcon = cat.icon
     const title = pick(toast.title_en, toast.title_ur) || (lang === 'ur' ? cat.ur : cat.en)
     return (
-      <div role="alert" className="awaaz-dash-toast pointer-events-auto flex w-full max-w-lg items-center gap-2 rounded-2xl bg-red-600 p-2 text-white shadow-xl">
+      <div
+        role="alert"
+        className={clsx(
+          'awaaz-dash-toast pointer-events-auto flex w-full max-w-lg items-center gap-2 rounded-2xl bg-red-600 p-2 text-white shadow-xl',
+          toast.sos && 'ring-4 ring-red-300',
+        )}
+      >
         <button
           type="button"
           onClick={() => { onOpen(toast.assignmentId); onDismiss(toast.id) }}
           className="flex min-h-12 min-w-0 flex-1 items-center gap-3 text-start"
         >
-          <span className="relative inline-flex size-12 shrink-0 items-center justify-center rounded-full border-2 border-white" style={{ background: cat.color }}>
-            <CatIcon className="size-6" />
-            <BellRing className="absolute -top-1 -end-1 size-5 rounded-full bg-white p-0.5 text-red-600" />
-          </span>
+          {toast.sos ? (
+            <span className="relative inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-white text-red-600">
+              <span aria-hidden className="awaaz-dash-ping absolute inset-0 rounded-full bg-white/70" />
+              <Siren className="relative size-7" strokeWidth={2.4} />
+            </span>
+          ) : (
+            <span className="relative inline-flex size-12 shrink-0 items-center justify-center rounded-full border-2 border-white" style={{ background: cat.color }}>
+              <CatIcon className="size-6" />
+              <BellRing className="absolute -top-1 -end-1 size-5 rounded-full bg-white p-0.5 text-red-600" />
+            </span>
+          )}
           <span className="min-w-0">
-            <span className="block truncate font-extrabold">{t('dashboard.newAlert', { title })}</span>
+            <span className="block truncate font-extrabold">
+              {toast.sos ? t('dashboard.sosNewAlert') : t('dashboard.newAlert', { title })}
+            </span>
             <span className="block text-sm opacity-90">
               {toast.more > 0 ? t('dashboard.moreNew', { n: toast.more }) : t('dashboard.tapToOpen')}
             </span>

@@ -90,15 +90,117 @@ registerRoute(
 )
 
 // OpenStreetMap tiles (or VITE_MAP_TILE_URL's host): cache what the user actually viewed, never bulk-prefetch.
+// OSM tile usage policy: honour the server's caching headers — never store no-store/private tiles, refetch a cached
+// tile once its max-age / Expires has passed (while online), and still show the stale tile if that refetch fails.
 // Google Maps tiles/APIs are never cached (ToS) — no route matches them.
+const TILE_CACHE = 'map-tiles'
+const STORED_AT = 'x-awaaz-stored-at'
 const tileHost = tileHostPattern(import.meta.env.VITE_MAP_TILE_URL as string | undefined)
+const honourCacheHeaders: WorkboxPlugin = {
+  cacheWillUpdate: async ({ response }) => {
+    if (/\b(no-store|private)\b/i.test(response.headers.get('cache-control') ?? '')) return null
+    // CORS hides the Date header, so remember when we stored the tile (max-age is relative to that)
+    const headers = new Headers(response.headers)
+    headers.set(STORED_AT, String(Date.now()))
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
+  },
+  cachedResponseWillBeUsed: async ({ cachedResponse }) => {
+    if (!cachedResponse) return null
+    if (!self.navigator.onLine) return cachedResponse
+    return isStale(cachedResponse, Date.now()) ? null : cachedResponse
+  },
+}
+/** Refetch of a stale tile failed (lie-fi / offline): a stale tile beats a grey square. Runs before corsUpgrade's retry. */
+const staleTileOnError: WorkboxPlugin = {
+  handlerDidError: async ({ request }) => (await caches.match(request, { cacheName: TILE_CACHE })) ?? undefined,
+}
 registerRoute(
   ({ url, request }) => request.destination === 'image' && tileHost.test(url.hostname),
   new CacheFirst({
-    cacheName: 'map-tiles',
-    plugins: [corsUpgrade, okOnly, new ExpirationPlugin({ maxEntries: 600, maxAgeSeconds: 7 * 24 * 3600, purgeOnQuotaError: true })],
+    cacheName: TILE_CACHE,
+    plugins: [
+      staleTileOnError, corsUpgrade, okOnly, honourCacheHeaders,
+      new ExpirationPlugin({ maxEntries: 600, maxAgeSeconds: 7 * 24 * 3600, purgeOnQuotaError: true }),
+    ],
   }),
 )
+
+/** HTTP freshness of a cached response: max-age (from when we stored it) wins over Expires; no info = fresh. */
+function isStale(res: Response, now: number): boolean {
+  const maxAge = /(?:^|[,\s])max-age=(\d+)/i.exec(res.headers.get('cache-control') ?? '')
+  const storedAt = Number(res.headers.get(STORED_AT))
+  if (maxAge && storedAt > 0) return now > storedAt + Number(maxAge[1]) * 1000
+  const expires = Date.parse(res.headers.get('expires') ?? '')
+  return Number.isFinite(expires) ? now > expires : false
+}
+
+// Pre-recorded voice prompts (/voice/<lang>/<id>.mp3, see src/lib/voice): small clips the illiterate-first UI plays
+// everywhere, so cache them for offline use. Media elements ask for byte ranges: always fetch + cache the whole
+// file, then answer a Range request with a 206 slice (Safari refuses to play a 200 answer to a range request).
+const VOICE_CACHE = 'voice-prompts'
+const VOICE_MANIFEST = '/voice/manifest.json'
+const voiceExpiration = new ExpirationPlugin({ maxEntries: 60, maxAgeSeconds: 30 * 24 * 3600, purgeOnQuotaError: true })
+const wholeFileForMedia: WorkboxPlugin = {
+  requestWillFetch: async ({ request }) => (request.headers.has('range')
+    ? new Request(request.url, { credentials: 'same-origin', referrer: request.referrer })
+    : request),
+  handlerWillRespond: async ({ request, response }) => {
+    const range = request.headers.get('range')
+    return range && response.status === 200 ? partialResponse(range, response) : response
+  },
+}
+registerRoute(
+  ({ url, sameOrigin }) => sameOrigin && /^\/voice\/[a-z]{2}\/[\w-]+\.mp3$/i.test(url.pathname),
+  new CacheFirst({ cacheName: VOICE_CACHE, plugins: [wholeFileForMedia, okOnly, voiceExpiration] }),
+)
+
+/** 206 slice of a full 200 response for a `Range: bytes=a-b` request (single range; anything else = full file). */
+async function partialResponse(range: string, full: Response): Promise<Response> {
+  const blob = await full.blob()
+  const size = blob.size
+  const headers = new Headers(full.headers)
+  const m = /^bytes=(\d*)-(\d*)$/i.exec(range.trim())
+  if (!m || (m[1] === '' && m[2] === '')) return new Response(blob, { status: 200, statusText: 'OK', headers })
+  let start: number
+  let end: number
+  if (m[1] === '') {
+    start = Math.max(0, size - Number(m[2]))
+    end = size - 1
+  } else {
+    start = Number(m[1])
+    end = m[2] === '' ? size - 1 : Math.min(Number(m[2]), size - 1)
+  }
+  if (start >= size || start > end) {
+    return new Response(null, { status: 416, statusText: 'Range Not Satisfiable', headers: { 'Content-Range': `bytes */${size}` } })
+  }
+  headers.set('Content-Range', `bytes ${start}-${end}/${size}`)
+  headers.set('Content-Length', String(end - start + 1))
+  return new Response(blob.slice(start, end + 1), { status: 206, statusText: 'Partial Content', headers })
+}
+
+/**
+ * Clip files keep their names when a prompt's text is re-recorded; public/voice/manifest.json holds a hash per clip.
+ * On every new worker, drop only the cached clips whose hash changed (or everything if we have no earlier manifest).
+ */
+async function refreshVoiceCache(): Promise<void> {
+  const res = await fetch(VOICE_MANIFEST, { cache: 'no-store' })
+  if (!res.ok) return
+  const next = (await res.clone().json()) as Record<string, string>
+  const cache = await caches.open(VOICE_CACHE)
+  const manifestKey = new URL(VOICE_MANIFEST, self.location.origin).href
+  const prevRes = await cache.match(manifestKey)
+  const prev = prevRes ? ((await prevRes.json().catch(() => null)) as Record<string, string> | null) : null
+  if (prev) {
+    const changed = Object.keys(prev).filter((id) => prev[id] !== next[id])
+    await Promise.all(changed.map((id) => cache.delete(new URL(`/voice/${id}.mp3`, self.location.origin).href)))
+  } else {
+    await voiceExpiration.deleteCacheAndMetadata()
+  }
+  await (await caches.open(VOICE_CACHE)).put(manifestKey, res)
+}
+self.addEventListener('activate', (event) => {
+  event.waitUntil(refreshVoiceCache().catch(() => { /* offline: keep what we have */ }))
+})
 
 function safeOrigin(u: string | undefined): string {
   try { return u ? new URL(u).origin : '' } catch { return '' }

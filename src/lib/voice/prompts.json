@@ -90,5 +90,17 @@
   "tryAgain": {
     "ur": "کچھ گڑبڑ ہو گئی۔ براہِ کرم دوبارہ کوشش کریں۔",
     "en": "Something went wrong. Please try again."
+  },
+  "phoneInvalid": {
+    "ur": "یہ نمبر درست نہیں لگتا۔ موبائل نمبر صفر تین سے شروع ہوتا ہے اور اس میں گیارہ ہندسے ہوتے ہیں۔ یا ڈیمو نمبر والا بٹن دبائیں۔",
+    "en": "This number does not look right. A mobile number starts with zero three and has eleven digits. Or press the demo number button."
+  },
+  "codeWrong": {
+    "ur": "یہ کوڈ درست نہیں۔ اوپر والے پیغام کو دبائیں، کوڈ خود بھر جائے گا۔",
+    "en": "That code is not right. Tap the message at the top, and the code will fill in by itself."
+  },
+  "profileRetry": {
+    "ur": "معاف کیجیے، ہم آپ کا نام اور علاقہ پوری طرح نہیں سمجھ سکے۔ مائیک دبائیں اور دوبارہ بتائیں، مثلاً: میرا نام عائشہ ہے، اور میں جی نائن میں رہتی ہوں۔",
+    "en": "Sorry, we did not quite catch your name and your area. Press the mic and say them again, for example: My name is Ayesha and I live in G-9."
   }
 }

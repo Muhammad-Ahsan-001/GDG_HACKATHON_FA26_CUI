@@ -7,17 +7,21 @@ import { useLocation, useMatch, useNavigate, useSearchParams } from 'react-route
 import { AppHeader } from '../components/layout/AppHeader'
 import { ActionBar, LocateButton } from '../components/map/ActionBar'
 import { CategoryFilter } from '../components/map/CategoryFilter'
+import { CoachMark, coachSeen, markCoachSeen } from '../components/map/CoachMark'
 import '../components/map/map.css'
 import { BaseMap, ClusterLayer, InvalidateOnResize, type ClusterItem } from '../components/leaflet/BaseMap'
 import { pinIcon, userDotIcon } from '../components/leaflet/icons'
 import { PinSheet } from '../components/map/PinSheet'
+import { SosButton } from '../components/sos/SosButton'
 import { Spinner } from '../components/ui'
+import { VoiceGuide } from '../components/voice/VoiceGuide'
 import { config } from '../config'
 import { useClusters } from '../hooks/useClusters'
 import { useGeolocation, type GeoFix } from '../hooks/useGeolocation'
 import { api } from '../lib/api'
 import { URGENCY_META } from '../lib/categories'
 import { useI18n } from '../lib/i18n'
+import { stopVoice } from '../lib/voice/player'
 import type { Category, MapPin, ProcessReportResponse } from '../lib/types'
 
 // Report sheet (other builder) is code-split: the map paints first, the chunk is prefetched when idle.
@@ -242,10 +246,23 @@ export default function MapPage() {
     () => (fixLat !== undefined && fixLng !== undefined ? { lat: fixLat, lng: fixLng } : null),
     [fixLat, fixLng],
   )
-  const showEmpty = !loading && !error && pins.length === 0 && !isReport && !selectedId
+  // ---- first-run coach mark on the mic (after onboarding: location.state.firstRun; otherwise once per device) ----
+  const firstRun = Boolean((location.state as { firstRun?: boolean } | null)?.firstRun)
+  const [coach, setCoach] = useState(() => firstRun || !coachSeen())
+  const dismissCoach = useCallback(() => {
+    markCoachSeen()
+    setCoach(false)
+    // drop the one-shot router state so a reload does not show the coach mark again
+    if ((window.history.state as { usr?: { firstRun?: boolean } } | null)?.usr?.firstRun) {
+      navRef.current(window.location.pathname + window.location.search, { replace: true, state: null })
+    }
+  }, [])
+  const showCoach = coach && !isReport && !selectedId
+
+  const showEmpty = !loading && !error && pins.length === 0 && !isReport && !selectedId && !showCoach
 
   return (
-    <div className={clsx('relative h-dvh w-full overflow-hidden bg-slate-200', LOW_END && 'awaaz-lite')}>
+    <div className={clsx('awaaz-map-page relative h-dvh w-full overflow-hidden bg-slate-200', LOW_END && 'awaaz-lite')}>
       {/* ---------- map (Leaflet + OpenStreetMap, no key) ---------- */}
       <BaseMap className="absolute inset-0 z-0" onMoveEnd={onMoveEnd}>
         <InvalidateOnResize />
@@ -263,53 +280,68 @@ export default function MapPage() {
         )}
       </BaseMap>
 
-      {/* ---------- top: header + filter chips + status ---------- */}
+      {/* ---------- top: header + filter chips; SOS (start) · status · voice help (end) ---------- */}
       <AppHeader floating />
-      <div className="absolute inset-x-0 top-[calc(env(safe-area-inset-top)_+_3.75rem)] z-20">
-        <CategoryFilter
-          selected={filter}
-          onToggle={toggleCategory}
-          onAll={clearFilter}
-          counts={counts}
-          total={allPins.length}
-        />
-        {error && (
-          <div className="mt-2 flex justify-center px-3">
-            <div role="alert" className="flex items-center gap-2 rounded-full bg-white py-1 ps-3 pe-1 text-sm font-semibold text-red-700 shadow">
-              <TriangleAlert className="size-5 shrink-0" />
-              {t('map.loadError')}
-              <button
-                type="button"
-                onClick={() => void refresh()}
-                aria-label={t('common.retry')}
-                title={t('common.retry')}
-                className="inline-flex size-10 items-center justify-center rounded-full bg-red-50"
-              >
-                <RefreshCw className="size-5" />
-              </button>
-            </div>
+      <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)_+_3.75rem)] z-20">
+        <div className="pointer-events-auto">
+          <CategoryFilter
+            selected={filter}
+            onToggle={toggleCategory}
+            onAll={clearFilter}
+            counts={counts}
+            total={allPins.length}
+          />
+        </div>
+        <div className="mt-2 flex items-start gap-2 px-3">
+          {/* women's safety SOS: press-and-hold, deliberately far away from the report mic at the bottom.
+              SOS is silent: touching it stops any voice guide that is playing. */}
+          <span data-awaaz-sos="" className="pointer-events-auto inline-flex" onPointerDownCapture={stopVoice}>
+            <SosButton size={60} className="[&>[role=status]]:start-0" />
+          </span>
+          <div className="flex min-w-0 flex-1 justify-center pt-1.5">
+            {error && (
+              <div role="alert" className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-full bg-white py-1 ps-3 pe-1 text-sm font-semibold text-red-700 shadow">
+                <TriangleAlert className="size-5 shrink-0" />
+                <span className="min-w-0 truncate">{t('map.loadError')}</span>
+                <button
+                  type="button"
+                  onClick={() => void refresh()}
+                  aria-label={t('common.retry')}
+                  title={t('common.retry')}
+                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-red-50"
+                >
+                  <RefreshCw className="size-5" />
+                </button>
+              </div>
+            )}
           </div>
-        )}
+          {/* "what is this screen?" — speaks mapIntro in the user's language */}
+          <span data-awaaz-coach-keep="" className="pointer-events-auto mt-1.5 inline-flex">
+            <VoiceGuide prompt="mapIntro" size={48} label={false} />
+          </span>
+        </div>
       </div>
 
       {/* ---------- bottom: live chip, locate, hints, action bar ---------- */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-[calc(max(1.75rem,env(safe-area-inset-bottom)_+_0.75rem)_+_7rem)] z-20 flex items-end justify-between gap-2 px-3">
-        <span
-          className="pointer-events-auto inline-flex min-h-9 items-center gap-1.5 rounded-full bg-white/95 px-3 text-xs font-bold text-ink shadow-sm"
-          title={live ? t('map.live') : undefined}
-        >
+      {!showCoach && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-[calc(max(1.75rem,env(safe-area-inset-bottom)_+_0.75rem)_+_8.25rem)] z-20 flex items-end justify-between gap-2 px-3">
           <span
-            aria-hidden
-            className={clsx('size-2.5 rounded-full', live ? 'bg-green-500' : 'bg-slate-400', highlighted.size > 0 && 'awaaz-live-dot')}
-          />
-          {live && <span>{t('map.live')}</span>}
-          <span className="font-latin text-slate-500">· {t('map.pinsCount', { n: pins.length })}</span>
-        </span>
-        <LocateButton state={geo.state} onLocate={() => void onLocate()} className="pointer-events-auto" />
-      </div>
+            className="pointer-events-auto inline-flex min-h-9 items-center gap-1.5 rounded-full bg-white/95 px-3 text-xs font-bold text-ink shadow-sm"
+            title={live ? t('map.live') : undefined}
+          >
+            <span
+              aria-hidden
+              className={clsx('size-2.5 rounded-full', live ? 'bg-green-500' : 'bg-slate-400', highlighted.size > 0 && 'awaaz-live-dot')}
+            />
+            {live && <span>{t('map.live')}</span>}
+            <span className="font-latin text-slate-500">· {t('map.pinsCount', { n: pins.length })}</span>
+          </span>
+          <LocateButton state={geo.state} onLocate={() => void onLocate()} className="pointer-events-auto" />
+        </div>
+      )}
 
       {(showEmpty || toast) && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[calc(max(1.75rem,env(safe-area-inset-bottom)_+_0.75rem)_+_11.5rem)] z-20 flex justify-center px-4">
+        <div className="pointer-events-none absolute inset-x-0 bottom-[calc(max(1.75rem,env(safe-area-inset-bottom)_+_0.75rem)_+_12.75rem)] z-20 flex justify-center px-4">
           <div role="status" aria-live="polite" className="max-w-sm rounded-2xl bg-ink/90 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-lg">
             {toast ?? (allPins.length === 0 ? t('map.emptyHint') : t('map.noMatch'))}
           </div>
@@ -318,7 +350,12 @@ export default function MapPage() {
 
       {/* NEARBY_DIGEST_HOOK — phase 2: "what's happening near me" AI digest button (renders nothing yet) */}
 
-      <ActionBar onVoice={goVoice} onPhoto={goPhoto} onText={goText} />
+      <ActionBar
+        onVoice={goVoice}
+        onPhoto={goPhoto}
+        onText={goText}
+        micOverlay={showCoach ? <CoachMark onDismiss={dismissCoach} autoPlay={firstRun} /> : null}
+      />
 
       {/* ---------- sheets ---------- */}
       {(isReport || reportMounted) && (

@@ -23,34 +23,37 @@ export function usePhotoDraft(max = MAX_PHOTOS) {
     }
   }, [])
 
-  const add = useCallback(async (files: FileList | File[] | null) => {
-    if (!files || files.length === 0) return
+  /** Compress and attach; resolves with the photos actually added (in order). */
+  const add = useCallback(async (files: FileList | File[] | null): Promise<DraftPhoto[]> => {
+    const added: DraftPhoto[] = []
+    if (!files || files.length === 0) return added
     setError(null)
     const free = Math.max(0, max - photosRef.current.length - pending.current)
     const list = Array.from(files).filter((f) => !f.type || f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name)).slice(0, free)
-    if (list.length === 0) return
+    if (list.length === 0) return added
     pending.current += list.length
     setBusy(pending.current)
     // sequential: decoding several 12 MP photos at once can exhaust memory on cheap phones
     for (const file of list) {
       try {
         const { blob, width, height } = await compressImage(file)
-        if (!mounted.current) return
+        if (!mounted.current) return added
         const photo: DraftPhoto = { id: newClientId(), blob, url: URL.createObjectURL(blob), width, height }
-        setPhotos((prev) => {
-          const next = prev.length >= max ? prev : [...prev, photo]
-          if (next === prev) URL.revokeObjectURL(photo.url)
-          photosRef.current = next
-          return next
-        })
+        // decide outside the state updater (StrictMode may run updaters twice)
+        if (photosRef.current.length >= max) { URL.revokeObjectURL(photo.url); continue }
+        const next = [...photosRef.current, photo]
+        photosRef.current = next
+        setPhotos(next)
+        added.push(photo)
       } catch (e) {
-        if (!mounted.current) return
+        if (!mounted.current) return added
         setError(e instanceof MediaUploadError ? e.code : 'decode')
       } finally {
         pending.current -= 1
         if (mounted.current) setBusy(pending.current)
       }
     }
+    return added
   }, [max])
 
   const remove = useCallback((id: string) => {

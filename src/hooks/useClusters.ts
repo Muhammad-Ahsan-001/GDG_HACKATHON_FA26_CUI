@@ -33,10 +33,23 @@ export interface UseClustersResult {
   live: boolean
 }
 
+/** jsonb columns arrive as fresh objects on every fetch: compare them by value. */
+const JSON_KEYS = new Set<keyof MapPin>(['attributes'])
+
+function jsonEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (a == null || b == null) return false
+  try { return JSON.stringify(a) === JSON.stringify(b) } catch { return false }
+}
+
 function shallowEqual(a: MapPin, b: MapPin): boolean {
   const ka = Object.keys(a) as (keyof MapPin)[]
   if (ka.length !== Object.keys(b).length) return false
-  for (const k of ka) if (a[k] !== b[k]) return false
+  for (const k of ka) {
+    if (a[k] === b[k]) continue
+    if (JSON_KEYS.has(k) && jsonEqual(a[k], b[k])) continue
+    return false
+  }
   return true
 }
 

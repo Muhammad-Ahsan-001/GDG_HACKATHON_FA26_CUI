@@ -2,9 +2,19 @@
 // Every task runs on OpenAI: MODELS.<task>.primary, then MODELS.<task>.fallback on failure / timeout / invalid output.
 // Prompts are tuned for Islamabad / Rawalpindi: Urdu script, Roman Urdu, Punjabi, English and code-switching.
 
-import { MODELS } from './models.ts'
+import { MODELS, OPENAI_BASE } from './models.ts'
 import { AI_TIMEOUT_MS, FOOD_DEFAULT_SAFE_HOURS } from './config.ts'
-import { embeddings, OpenAIError, responsesJson, speech, transcription, type InputContent } from './openai.ts'
+import { embeddings, OpenAIError, outputText, responsesJson, speech, transcription, type InputContent, type Usage } from './openai.ts'
+import {
+  ATTRIBUTE_ICON_NAMES,
+  type AttributeMap,
+  CATEGORY_ATTRIBUTE_HINTS,
+  DEFAULT_ATTRIBUTES,
+  MAX_INTAKE_QUESTIONS,
+  type ReportAttribute,
+  sanitizeAttributes,
+  type UserUrgency,
+} from './attributes.ts'
 import {
   CATEGORIES,
   URGENCIES,
@@ -662,4 +672,859 @@ export async function digest(input: { pins: DigestPin[]; mode: 'nearby' | 'daily
     return { en, ur }
   })
   return { ...value, meta }
+}
+
+// ======================================================================= no-speech detection (Phase 1b)
+// Deterministic guard used BEFORE any AI call: silence, noise markers, filler sounds and the well-known
+// speech-to-text hallucinations on silent clips ("thank you for watching", "subscribe", a lone "شکریہ").
+
+export type NoSpeechReason = 'empty' | 'hallucination' | 'too_short'
+export interface NoSpeechCheck {
+  no_speech: boolean
+  reason: NoSpeechReason | null
+  /** number of real content words that remain after removing markers / fillers / hallucinations */
+  words: number
+}
+
+/** [music], (noise), *applause*, <silence>, ♪ … */
+const SPEECH_MARKERS = /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*|<[^>]*>|[♪♫♬]+/g
+const URDU_DIACRITICS = /[ً-ٰٟۖ-ۭ]/g
+
+function normSpeech(s: string): string {
+  return s
+    .normalize('NFC')
+    .replace(URDU_DIACRITICS, '')
+    .replace(/[يى]/g, 'ی')
+    .replace(/ك/g, 'ک')
+    .replace(/[هة]/g, 'ہ')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Phrases removed anywhere in a transcript (normalised form). */
+const HALLUCINATION_PHRASES = [
+  'thank you so much for watching', 'thank you very much for watching', 'thank you for watching', 'thanks for watching',
+  'thank you for listening', 'thanks for listening', 'please like and subscribe', 'like and subscribe',
+  'don t forget to subscribe', 'please subscribe', 'subscribe to my channel', 'subscribe to the channel',
+  'subscribe to our channel', 'subscribe', 'subtitles by the amara org community', 'subtitles by', 'subtitled by',
+  'captions by', 'transcribed by', 'amara org', 'see you in the next video', 'see you next time',
+  'blank audio', 'no speech', 'inaudible', 'music', 'applause', 'laughter', 'silence', 'background noise',
+  'دیکھنے کا شکریہ', 'دیکھنے کے لیے شکریہ', 'سننے کا شکریہ', 'ہمارے چینل کو سبسکرائب کریں', 'چینل کو سبسکرائب کریں',
+  'لائک اور سبسکرائب', 'سبسکرائب کریں', 'سبسکرائب', 'dekhne ka shukriya', 'subscribe karein', 'subscribe karen',
+  'देखने के लिए धन्यवाद', 'सब्सक्राइब', 'धन्यवाद',
+].map(normSpeech).sort((a, b) => b.length - a.length)
+
+/** Whole-transcript hallucinations / content-free phrases. */
+const WHOLE_HALLUCINATIONS = new Set([
+  'you', 'thank you', 'thank you very much', 'thank you so much', 'thanks', 'thanks a lot', 'bye', 'bye bye', 'the end',
+  'شکریہ', 'بہت شکریہ', 'شکریہ ادا', 'جزاک اللہ', 'اللہ حافظ', 'خدا حافظ', 'shukriya', 'shukria', 'bohat shukriya',
+  'bahut shukriya', 'jazakallah', 'allah hafiz', 'khuda hafiz', 'शुक्रिया', 'धन्यवाद',
+].map(normSpeech))
+
+/** Greetings: real speech, but no report content on their own. */
+const GREETING_PHRASES = [
+  'assalam o alaikum', 'assalamu alaikum', 'assalam alaikum', 'asalam o alaikum', 'aslam o alaikum', 'salam alaikum',
+  'السلام علیکم', 'اسلام علیکم', 'salaam', 'salam', 'سلام', 'hello', 'hellow', 'ہیلو', 'hi', 'hey',
+].map(normSpeech).sort((a, b) => b.length - a.length)
+
+const FILLER_TOKENS = new Set(['uh', 'um', 'umm', 'uhm', 'hmm', 'hmmm', 'hm', 'mm', 'mmm', 'ah', 'aah', 'ahh', 'oh', 'ohh', 'huh', 'er', 'erm', 'eh', 'آں', 'ہمم', 'اوہ', 'آہ'])
+
+function removePhrases(padded: string, phrases: string[]): { text: string; hit: boolean } {
+  let s = padded
+  let hit = false
+  for (const p of phrases) {
+    const needle = ` ${p} `
+    while (s.includes(needle)) {
+      s = s.replace(needle, ' ')
+      hit = true
+    }
+  }
+  return { text: s, hit }
+}
+
+/** The tokens are one whole-transcript hallucination repeated ("شکریہ شکریہ", "thank you thank you"). */
+function isRepeatedHallucination(tokens: string[]): boolean {
+  for (const p of WHOLE_HALLUCINATIONS) {
+    const pt = p.split(' ')
+    if (tokens.length % pt.length !== 0) continue
+    let all = true
+    for (let i = 0; i < tokens.length && all; i++) all = tokens[i] === pt[i % pt.length]
+    if (all) return true
+  }
+  return false
+}
+
+/**
+ * Is this transcript / text effectively silence? `minWords` = real content words required (default 2 — a first
+ * description; use 1 for answers to a follow-up question such as "haan" / "teen" / "no", and for a name).
+ */
+export function detectNoSpeech(text: string | null | undefined, opts: { minWords?: number } = {}): NoSpeechCheck {
+  const minWords = Math.max(1, opts.minWords ?? 2)
+  const norm = normSpeech(String(text ?? '').replace(SPEECH_MARKERS, ' '))
+  if (!norm) return { no_speech: true, reason: 'empty', words: 0 }
+  if (WHOLE_HALLUCINATIONS.has(norm)) return { no_speech: true, reason: 'hallucination', words: 0 }
+  const h = removePhrases(` ${norm} `, HALLUCINATION_PHRASES)
+  const g = removePhrases(h.text, GREETING_PHRASES)
+  const real = g.text.trim().split(' ').filter((t) => t && !FILLER_TOKENS.has(t) && (/\p{N}/u.test(t) || [...t].length >= 2))
+  const leftover = real.join(' ')
+  if (leftover && WHOLE_HALLUCINATIONS.has(leftover)) return { no_speech: true, reason: 'hallucination', words: 0 }
+  if (real.length > 1 && isRepeatedHallucination(real)) return { no_speech: true, reason: 'hallucination', words: 0 } // "Thank you. Thank you."
+
+  if (!real.length) return { no_speech: true, reason: g.hit ? 'too_short' : h.hit ? 'hallucination' : 'empty', words: 0 }
+  if (real.length < minWords) return { no_speech: true, reason: h.hit ? 'hallucination' : 'too_short', words: real.length }
+  return { no_speech: false, reason: null, words: real.length }
+}
+
+// ======================================================================= intakeTurn (Phase 1b report-chat)
+
+/** Same shapes as src/lib/attributes.ts (QuickReply, IntakeDraft). */
+export interface QuickReply { key: string; value: string; label_en: string; label_ur: string; icon: string }
+export interface IntakeDraft {
+  category: Category
+  urgency: Urgency
+  title_en: string
+  title_ur: string
+  summary_en: string
+  summary_ur: string
+}
+
+export interface IntakeTurnInput {
+  uiLanguage: 'ur' | 'en'
+  /** conversation before this turn (oldest first) */
+  history: { role: 'user' | 'ai'; text: string }[]
+  /** attributes known so far, WITH this turn's tapped quick reply already applied (see applyQuickReply) */
+  attributes: AttributeMap
+  /** what the user did this turn */
+  turnKind: 'voice' | 'text' | 'quick_reply' | 'photo'
+  /** this turn's words (transcript or typed text); '' for a tap / photo-only turn */
+  turnText: string
+  quickReply?: { key: string; value: string } | null
+  /** AI questions already asked before this turn */
+  questionsAsked: number
+  /** the first question must offer the user-urgency chips */
+  askUrgency: boolean
+  hasImage: boolean
+  hasGps: boolean
+}
+
+export interface IntakeTurnResult {
+  reply_en: string
+  reply_ur: string
+  quick_replies: QuickReply[]
+  /** FULL updated attribute map (known attributes merged with this turn's updates; user-given values protected) */
+  attributes: AttributeMap
+  draft: IntakeDraft
+  ready: boolean
+  emergency: boolean
+  ask_photo: boolean
+  /** nothing in the whole conversation is a local problem (greeting / chit-chat / joke / test) */
+  off_topic: boolean
+}
+
+/**
+ * Reasoning effort for the intake + profile calls: "none" measured fastest and reliable (the phase-aware parser in
+ * openai.ts skips the occasional extra "commentary" message). Env AI_INTAKE_EFFORT=low switches back without a deploy of code.
+ */
+const INTAKE_EFFORT: 'none' | 'low' = Deno.env.get('AI_INTAKE_EFFORT') === 'low' ? 'low' : 'none'
+const INTAKE_TIMEOUT_MS = 12000
+const PROFILE_TIMEOUT_MS = 10000
+
+const ICONS = ATTRIBUTE_ICON_NAMES as readonly string[]
+const DEFAULT_ATTR_MAP = new Map<string, { key: string; icon: string; label_en: string; label_ur: string }>(
+  DEFAULT_ATTRIBUTES.map((a) => [a.key, a]),
+)
+
+export const USER_URGENCY_LABELS: Record<UserUrgency, { en: string; ur: string; icon: string; severity: ReportAttribute['severity'] }> = {
+  emergency: { en: 'Emergency', ur: 'ایمرجنسی', icon: 'siren', severity: 'danger' },
+  urgent: { en: 'Urgent', ur: 'فوری', icon: 'alert-triangle', severity: 'warn' },
+  can_wait: { en: 'Can wait', ur: 'انتظار ہو سکتا ہے', icon: 'clock', severity: 'info' },
+}
+
+/** The three user-urgency chips offered on the first question. */
+export const URGENCY_QUICK_REPLIES: QuickReply[] = (['emergency', 'urgent', 'can_wait'] as const).map((u) => ({
+  key: 'user_urgency',
+  value: u,
+  label_en: USER_URGENCY_LABELS[u].en,
+  label_ur: USER_URGENCY_LABELS[u].ur,
+  icon: USER_URGENCY_LABELS[u].icon,
+}))
+
+/** 'emergency' | 'urgent' | 'can_wait' from a machine value or a label (EN / UR / Roman Urdu). */
+export function parseUserUrgency(v: unknown): UserUrgency | null {
+  const s = str(v).toLowerCase()
+  if (!s) return null
+  if (/emerg|ایمرجنسی|ہنگامی/.test(s)) return 'emergency'
+  if (/can.?wait|wait|later|not urgent|انتظار|بعد میں/.test(s)) return 'can_wait'
+  if (/urgent|jaldi|fori|فوری|جلدی|ضروری/.test(s)) return 'urgent'
+  return null
+}
+
+/** The user_urgency attribute in canonical form (value_en exactly 'Emergency' | 'Urgent' | 'Can wait'). */
+export function userUrgencyAttribute(u: UserUrgency, source: ReportAttribute['source'] = 'user'): ReportAttribute {
+  const m = USER_URGENCY_LABELS[u]
+  return {
+    key: 'user_urgency', label_en: 'How urgent', label_ur: 'کتنا ضروری', value_en: m.en, value_ur: m.ur,
+    icon: 'siren', severity: m.severity, source,
+  }
+}
+
+/** UserUrgency recorded in an attribute map, if any. */
+export function userUrgencyOf(attrs: AttributeMap | null | undefined): UserUrgency | null {
+  const a = attrs?.user_urgency
+  return a ? parseUserUrgency(a.value_en) : null
+}
+
+function humanize(key: string): string {
+  const s = key.replace(/_/g, ' ').trim()
+  return s ? s[0].toUpperCase() + s.slice(1) : key
+}
+
+function snakeKey(v: unknown): string {
+  return str(v).toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40)
+}
+
+/** Machine value of a chip: lowercase, spaces -> _, keeps digits / letters (any script) / . - _ */
+function chipValue(v: unknown): string {
+  return str(v).toLowerCase().replace(/\s+/g, '_').replace(/[^\p{L}\p{N}_.\-]/gu, '').slice(0, 40)
+}
+
+const YES_NO_VALUES: Record<string, { en: string; ur: string }> = {
+  yes: { en: 'Yes', ur: 'ہاں' },
+  no: { en: 'No', ur: 'نہیں' },
+  unknown: { en: 'Not sure', ur: 'معلوم نہیں' },
+  not_sure: { en: 'Not sure', ur: 'معلوم نہیں' },
+  dont_know: { en: 'Not sure', ur: 'معلوم نہیں' },
+}
+
+/** Keys whose "yes" means risk to life / limb, and keys whose "no" does. */
+const DANGER_IF_YES = new Set([
+  'injuries', 'children_at_risk', 'people_trapped', 'stranded_people', 'weapon_seen', 'ongoing_threat', 'bleeding',
+  'gas_cylinder_nearby', 'water_rising', 'wire_live', 'sparking', 'anyone_inside', 'people_inside', 'anyone_hurt',
+  'anyone_trapped', 'unconscious',
+])
+const DANGER_IF_NO = new Set(['conscious', 'breathing'])
+const WARN_IF_YES = new Set(['still_happening', 'road_blocked', 'houses_flooded', 'recurring'])
+
+/**
+ * Deterministically apply a tapped quick reply to the attribute map (BEFORE the AI call), source 'user'.
+ * label_en / label_ur / icon = the chip's own labels when the client sends them back (optional).
+ */
+export function applyQuickReply(
+  attrs: AttributeMap,
+  qr: { key: string; value: string; label_en?: string; label_ur?: string; icon?: string },
+): AttributeMap {
+  const key = snakeKey(qr.key)
+  const value = chipValue(qr.value)
+  if (!key || !value) return attrs
+  if (key === 'user_urgency') {
+    const u = parseUserUrgency(value)
+    return u ? { ...attrs, user_urgency: userUrgencyAttribute(u, 'user') } : attrs
+  }
+  const prev = attrs[key]
+  const def = DEFAULT_ATTR_MAP.get(key)
+  const yn = YES_NO_VALUES[value]
+  const value_en = yn?.en ?? (str(qr.label_en) || humanize(value))
+  const value_ur = yn?.ur ?? (str(qr.label_ur) || str(qr.label_en) || humanize(value))
+  let severity: ReportAttribute['severity'] = prev?.severity ?? 'info'
+  if (value === 'yes' && DANGER_IF_YES.has(key)) severity = 'danger'
+  else if (value === 'no' && DANGER_IF_NO.has(key)) severity = 'danger'
+  else if (value === 'yes' && WARN_IF_YES.has(key)) severity = 'warn'
+  else if (yn) severity = 'info'
+  const icon = def?.icon ?? prev?.icon ?? (ICONS.includes(str(qr.icon)) ? str(qr.icon) : 'info')
+  return {
+    ...attrs,
+    [key]: {
+      key,
+      label_en: def?.label_en ?? prev?.label_en ?? humanize(key),
+      label_ur: def?.label_ur ?? prev?.label_ur ?? humanize(key),
+      value_en: value_en.slice(0, 120),
+      value_ur: value_ur.slice(0, 120),
+      icon,
+      severity,
+      source: 'user',
+    },
+  }
+}
+
+/** A tapped value the server labels exactly (the AI must not rephrase it). */
+function isDeterministicValue(value: string): boolean {
+  const v = chipValue(value)
+  return v in YES_NO_VALUES || /^\d+(\.\d+)?$/.test(v)
+}
+
+const INTAKE_ATTRIBUTE_ITEM = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['key', 'value_en', 'value_ur', 'label_en', 'label_ur', 'icon', 'severity', 'source'],
+  properties: {
+    key: { type: 'string', description: 'snake_case' },
+    value_en: { type: 'string', description: '1-4 words' },
+    value_ur: { type: 'string', description: '1-4 words, Urdu script' },
+    label_en: { type: 'string', description: '"" for default keys' },
+    label_ur: { type: 'string', description: '"" for default keys' },
+    icon: { type: 'string', enum: [...ATTRIBUTE_ICON_NAMES, ''] },
+    severity: { type: 'string', enum: ['info', 'warn', 'danger'] },
+    source: { type: 'string', enum: ['user', 'ai'] },
+  },
+}
+
+// Property order = generation order: the decision and the spoken reply come FIRST so the reply can be streamed
+// to text-to-speech while the model is still writing the draft and attributes.
+const INTAKE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['emergency', 'ready', 'off_topic', 'reply_en', 'reply_ur', 'quick_replies', 'ask_photo', 'draft', 'attributes'],
+  properties: {
+    emergency: { type: 'boolean' },
+    ready: { type: 'boolean' },
+    off_topic: { type: 'boolean' },
+    reply_en: { type: 'string' },
+    reply_ur: { type: 'string', description: 'Urdu script' },
+    quick_replies: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['key', 'value', 'label_en', 'label_ur', 'icon'],
+        properties: {
+          key: { type: 'string' },
+          value: { type: 'string', description: 'machine-readable: yes / no / a number / snake_case option' },
+          label_en: { type: 'string' },
+          label_ur: { type: 'string' },
+          icon: { type: 'string', enum: [...ATTRIBUTE_ICON_NAMES] },
+        },
+      },
+    },
+    ask_photo: { type: 'boolean' },
+    draft: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['category', 'urgency', 'title_en', 'title_ur', 'summary_en', 'summary_ur'],
+      properties: {
+        category: { type: 'string', enum: CATEGORIES },
+        urgency: { type: 'string', enum: URGENCIES },
+        title_en: { type: 'string', description: 'at most 8 words' },
+        title_ur: { type: 'string', description: 'at most 8 words, Urdu script' },
+        summary_en: { type: 'string', description: '1-2 short sentences' },
+        summary_ur: { type: 'string', description: '1-2 short sentences, Urdu script' },
+      },
+    },
+    attributes: { type: 'array', items: INTAKE_ATTRIBUTE_ITEM, description: 'facts that are new or changed this turn' },
+  },
+}
+
+const INTAKE_INSTRUCTIONS = `You run the intake conversation for Awaaz, a voice-first app where citizens of Islamabad / Rawalpindi, Pakistan report local problems to responders (Rescue 1122, fire brigade, police, WASA / CDA / IESCO, NGOs, food banks). Many users cannot read: your reply is spoken aloud, and they answer by speaking or by tapping big icon buttons (quick replies).
+Each call is ONE turn. You get the context, the facts (attributes) known so far, the conversation so far and this turn's input (a voice transcript that may be noisy, typed text, a tapped button, or a new photo). Return ONE JSON object matching the schema.
+Goal: the most useful facts for responders in the fewest questions — at most ${MAX_INTAKE_QUESTIONS} questions in the whole conversation.
+Users speak Urdu script, Roman Urdu, Punjabi / Pothwari, English or a mix (gutter khula = open manhole, bijli ki taar = electric wire, aag = fire, dhuan = smoke, pani = water, nala = storm drain, zakhmi = injured, behosh = unconscious, bachay = children, sarak = road, gali = street, jaldi = quickly).
+
+ATTRIBUTES — list every fact that is NEW or CHANGED by this turn (facts already known with the same value: leave them out).
+- Default keys: ${DEFAULT_ATTRIBUTES.map((a) => `${a.key} (${a.label_en})`).join(', ')}.
+- Category keys (use when relevant):
+${Object.entries(CATEGORY_ATTRIBUTE_HINTS).filter(([, v]) => v.length).map(([k, v]) => `  ${k}: ${v.join('; ')}`).join('\n')}
+- You may add other short snake_case keys that matter to responders.
+- value_en / value_ur: 1-4 words ("3 people" / "3 لوگ", "Yes" / "ہاں", "No" / "نہیں", "Since morning" / "صبح سے", "Knee deep" / "گھٹنوں تک"); value_ur in Urdu script.
+- label_en / label_ur / icon: "" for default keys (filled in automatically); for any other key give a 1-3 word label in both languages and the best icon.
+- severity: "danger" = risk to life or limb (someone hurt or trapped, children at risk, live wire, fire spreading, unconscious, weapon); "warn" = serious (road blocked, still happening, water rising); "info" = neutral facts.
+- source: "user" when the user said or tapped it explicitly; "ai" when you inferred it.
+- Fill everything that can be inferred from what was already said (e.g. "school ke bahar gutter khula" -> landmark "School", hazard_type "Open manhole", children_at_risk "Yes" (ai)). Never invent facts; never write "unknown".
+- user_urgency: ONLY when the user themselves said how urgent it is; value_en exactly "Emergency", "Urgent" or "Can wait".
+
+DRAFT — the report as it stands now: category (hazard = open manhole, live / fallen wire, broken road, collapsed wall, fallen tree; fire; flood = waterlogging, nala overflow; water = supply cut, dirty water, pipe leak; food = surplus food to donate or hunger; health = injured / sick / unconscious person, dengue; safety = crime, harassment, violence, threats; other), urgency (critical = danger to life right now; high = likely to hurt someone soon or affects many; medium = needs action within a day; low = inconvenience), title_en / title_ur (at most 8 words: problem + place), summary_en / summary_ur (1-2 short sentences with the key facts). Urdu fields in Urdu script.
+
+FLAGS
+- emergency = true only when the words clearly show danger to life RIGHT NOW (fire with people inside or nearby, an unconscious or not-breathing person, a live / sparking electric wire on a road or in water, someone drowning or trapped, violence in progress) OR the user says it is an emergency. A fallen wire, open manhole or flooding with no sign yet of immediate harm is NOT an emergency (draft urgency high): ask instead.
+- ready = true when responders can act: what the problem is + where (GPS point or a landmark / street) + the key danger fact for the category is known (hazard: anyone hurt / wire live or sparking; fire: anyone inside or trapped; flood: anyone stranded / water rising; water: how many homes / since when; health: conscious and breathing; safety: is the danger still there; food: how many people it can feed). Also true when emergency is true or no questions are left.
+- ask_photo = true when a photo would clearly help (visible hazard, damage, flooding, fire, food on offer) and none is attached yet. Never for emergencies or crime / violence.
+- off_topic = true ONLY when the whole conversation contains no local problem at all (only greetings, chit-chat, a song, a joke, abuse, a test). When in doubt: false.
+
+REPLY — reply_en and reply_ur say the same thing; reply_ur is natural spoken Pakistani Urdu in Urdu script (never Roman Urdu).
+- Not ready: ONE short question (at most 15 words, very simple words), optionally after a 1-2 word acknowledgement ("OK." / "جی۔"). Ask the single most important unknown for THIS category: danger to people first (anyone hurt or trapped, children), then where exactly (only when there is no GPS point and no landmark or street), then size / how many people, then since when. Never ask anything already known. Prefer yes / no or 2-4 choices.
+- Ready: a short confirmation of what will be sent (at most 30 words), ending with "Sending now?" / "ابھی بھیج دیں؟". If emergency: end with "Sending help now." / "ابھی مدد کے لیے بھیج رہے ہیں۔"
+- off_topic: kindly ask what problem there is in their area.
+
+QUICK_REPLIES — tap-able answers to your question (0-4; [] when ready or off_topic).
+- key = the attribute key the answer fills. For a yes / no question use a key named after the question (wire_live, anyone_inside, injuries, water_rising) — NEVER a key that already holds a different fact (e.g. not hazard_type for "is it sparking?").
+- value = machine-readable: "yes", "no", a number ("3"), or a short snake_case option ("knee_deep"); label_en / label_ur 1-3 words; icon that fits the meaning.
+- When the context says "Ask urgency now": unless emergency is true, ready = false, the question is how urgent it is and the quick replies are exactly user_urgency emergency (siren) / urgent (alert-triangle) / can_wait (clock).
+
+EXAMPLE
+Context: Ask urgency now; GPS point: yes; photo attached: no. This turn (voice): """gali number 5 mein school ke bahar gutter khula hai"""
+Output: {"emergency":false,"ready":false,"off_topic":false,"reply_en":"OK. How urgent is it?","reply_ur":"جی۔ یہ کتنا ضروری ہے؟","quick_replies":[{"key":"user_urgency","value":"emergency","label_en":"Emergency","label_ur":"ایمرجنسی","icon":"siren"},{"key":"user_urgency","value":"urgent","label_en":"Urgent","label_ur":"فوری","icon":"alert-triangle"},{"key":"user_urgency","value":"can_wait","label_en":"Can wait","label_ur":"انتظار ہو سکتا ہے","icon":"clock"}],"ask_photo":true,"draft":{"category":"hazard","urgency":"high","title_en":"Open manhole outside Street 5 school","title_ur":"گلی 5 کے اسکول کے باہر کھلا گٹر","summary_en":"An open manhole outside the school on Street 5. Children could fall in.","summary_ur":"گلی نمبر 5 میں اسکول کے باہر گٹر کھلا ہے۔ بچے گر سکتے ہیں۔"},"attributes":[{"key":"landmark","value_en":"School, Street 5","value_ur":"اسکول، گلی 5","label_en":"","label_ur":"","icon":"","severity":"info","source":"user"},{"key":"hazard_type","value_en":"Open manhole","value_ur":"کھلا گٹر","label_en":"Hazard","label_ur":"خطرہ","icon":"alert-triangle","severity":"danger","source":"user"},{"key":"children_at_risk","value_en":"Yes","value_ur":"ہاں","label_en":"","label_ur":"","icon":"","severity":"danger","source":"ai"}]}
+Next turn — Context: 1 question asked (2 left). This turn — the user tapped: user_urgency = urgent
+Output: {"emergency":false,"ready":false,"off_topic":false,"reply_en":"Has anyone fallen in or been hurt?","reply_ur":"کیا کوئی اس میں گرا ہے یا زخمی ہوا ہے؟","quick_replies":[{"key":"injuries","value":"yes","label_en":"Yes","label_ur":"ہاں","icon":"bandage"},{"key":"injuries","value":"no","label_en":"No","label_ur":"نہیں","icon":"bandage"}],"ask_photo":true,"draft":{ ...the same draft... },"attributes":[]}`
+
+function buildIntakeInput(input: IntakeTurnInput): string {
+  const left = Math.max(0, MAX_INTAKE_QUESTIONS - input.questionsAsked)
+  const lines: string[] = [
+    `App language: ${input.uiLanguage === 'ur' ? 'Urdu (the user hears reply_ur)' : 'English (the user hears reply_en)'}`,
+    `Questions asked so far: ${input.questionsAsked} of ${MAX_INTAKE_QUESTIONS} (${left} left)`,
+  ]
+  if (left === 0) lines.push('No questions left: set ready = true and give the final confirmation.')
+  else if (input.askUrgency) lines.push('Ask urgency now: unless emergency is true, ready = false and ask how urgent it is with the 3 urgency quick replies.')
+  lines.push(`GPS point: ${input.hasGps ? 'yes' : 'no'}`, `Photo attached: ${input.hasImage ? 'yes' : 'no'}`)
+
+  const known = Object.values(input.attributes ?? {})
+  lines.push('Known attributes:')
+  if (known.length) {
+    for (const a of known.slice(0, 20)) lines.push(`- ${a.key}: ${a.value_en} / ${a.value_ur} [${a.severity}, ${a.source}]`)
+  } else lines.push('- none')
+
+  const hist = (input.history ?? []).filter((t) => str(t.text)).slice(-12)
+  lines.push('Conversation so far:')
+  if (hist.length) for (const t of hist) lines.push(`${t.role === 'ai' ? 'AI' : 'User'}: ${str(t.text).slice(0, 600)}`)
+  else lines.push('(none — this is the first turn)')
+
+  const words = str(input.turnText).slice(0, 2000)
+  if (input.quickReply) lines.push(`This turn — the user tapped: ${input.quickReply.key} = ${input.quickReply.value}`)
+  if (input.turnKind === 'photo' && !words) lines.push('This turn — the user added a photo (no words).')
+  if (words) lines.push(`This turn — the user (${input.turnKind === 'voice' ? 'voice transcript, may be noisy' : 'typed'}): """${words}"""`)
+  return lines.join('\n')
+}
+
+function sanitizeQuickReplies(raw: unknown): QuickReply[] {
+  if (!Array.isArray(raw)) return []
+  const out: QuickReply[] = []
+  const seen = new Set<string>()
+  for (const q of raw) {
+    if (!q || typeof q !== 'object') continue
+    const r = q as Record<string, unknown>
+    const key = snakeKey(r.key)
+    const value = chipValue(r.value)
+    if (!key || !value || seen.has(`${key}=${value}`)) continue
+    seen.add(`${key}=${value}`)
+    const label_en = capWords(str(r.label_en), 4) || humanize(value)
+    const label_ur = capWords(str(r.label_ur), 5) || label_en
+    out.push({ key, value, label_en, label_ur, icon: ICONS.includes(str(r.icon)) ? str(r.icon) : 'info' })
+    if (out.length >= 4) break
+  }
+  return out
+}
+
+/** Model attribute items -> validated ReportAttributes (labels / icons of default keys filled in). */
+function attributeUpdates(raw: unknown): ReportAttribute[] {
+  if (!Array.isArray(raw)) return []
+  const out: ReportAttribute[] = []
+  for (const item of raw.slice(0, 20)) {
+    if (!item || typeof item !== 'object') continue
+    const r = item as Record<string, unknown>
+    const key = snakeKey(r.key)
+    const value_en = capWords(str(r.value_en), 8)
+    if (!key || !value_en || /^(unknown|n\/?a|none|not known)$/i.test(value_en)) continue
+    const source: ReportAttribute['source'] = r.source === 'user' ? 'user' : 'ai'
+    if (key === 'user_urgency') {
+      const u = parseUserUrgency(value_en) ?? parseUserUrgency(r.value_ur)
+      if (u) out.push(userUrgencyAttribute(u, source))
+      continue
+    }
+    const def = DEFAULT_ATTR_MAP.get(key)
+    const icon = str(r.icon)
+    out.push({
+      key,
+      label_en: def?.label_en ?? (capWords(str(r.label_en), 4) || humanize(key)),
+      label_ur: def?.label_ur ?? (capWords(str(r.label_ur), 5) || capWords(str(r.label_en), 4) || humanize(key)),
+      value_en,
+      value_ur: capWords(str(r.value_ur), 8) || value_en,
+      icon: def?.icon ?? (ICONS.includes(icon) ? icon : 'info'),
+      severity: r.severity === 'danger' || r.severity === 'warn' ? r.severity : 'info',
+      source,
+    })
+  }
+  return out
+}
+
+/**
+ * Merge this turn's updates into the known attributes:
+ * - a value the user gave earlier (source 'user') is only replaced by another user-given value;
+ * - the chip tapped THIS turn keeps exactly the value applied by applyQuickReply for user_urgency / yes / no /
+ *   numbers; for other chip values the AI may only re-word it (source forced to 'user').
+ */
+function mergeAttributes(prev: AttributeMap, updates: ReportAttribute[], tapped?: { key: string; value: string } | null): AttributeMap {
+  const out: AttributeMap = { ...prev }
+  const tappedKey = tapped ? snakeKey(tapped.key) : ''
+  const tappedFixed = tapped ? tappedKey === 'user_urgency' || isDeterministicValue(tapped.value) : false
+  const sevRank = { info: 0, warn: 1, danger: 2 } as const
+  for (const a of updates) {
+    const p = prev[a.key]
+    if (a.key === tappedKey) {
+      if (tappedFixed && p) {
+        if (a.key === 'user_urgency') continue // the user's urgency choice is never re-worded
+        // keep the tapped value + source exactly; take the AI's wording of the label, icon and severity
+        const generic = !DEFAULT_ATTR_MAP.has(a.key)
+        out[a.key] = {
+          ...p,
+          ...(generic ? { label_en: a.label_en, label_ur: a.label_ur, icon: a.icon !== 'info' ? a.icon : p.icon } : {}),
+          severity: sevRank[a.severity] > sevRank[p.severity] ? a.severity : p.severity,
+        }
+        continue
+      }
+      out[a.key] = { ...a, source: 'user' }
+      continue
+    }
+    if (p?.source === 'user' && a.source !== 'user') continue
+    out[a.key] = a
+  }
+  // defaults first (stable display order), then extras; sanitizeAttributes caps at 20
+  const ordered: AttributeMap = {}
+  for (const d of DEFAULT_ATTRIBUTES) if (out[d.key]) ordered[d.key] = out[d.key]
+  for (const [k, v] of Object.entries(out)) if (!ordered[k]) ordered[k] = v
+  return sanitizeAttributes(ordered)
+}
+
+const YES_NO_TEXT = /^(yes|no|not sure|ہاں|نہیں|معلوم نہیں)$/i
+const QUESTION_STOPWORDS = new Set([
+  'is', 'are', 'was', 'were', 'has', 'have', 'had', 'did', 'does', 'do', 'can', 'could', 'will', 'would', 'should',
+  'the', 'a', 'an', 'any', 'there', 'it', 'its', 'this', 'that', 'these', 'of', 'or', 'and', 'in', 'on', 'at', 'to',
+  'been', 'be', 'still', 'ok', 'okay', 'noted', 'yes', 'no', 'please', 'tell', 'me', 'us', 'you', 'your',
+])
+
+/** snake_case key from the question, e.g. "Is the fallen wire live or sparking?" -> "fallen_wire_live". */
+function keyFromQuestion(q: string): string {
+  const words = q.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w && !QUESTION_STOPWORDS.has(w))
+  return snakeKey(words.slice(0, 3).join('_'))
+}
+
+/**
+ * Guard: yes / no chips must not overwrite a different fact (e.g. key hazard_type = "Fallen electric wire" for
+ * "Is it sparking?"). Such chips get a key derived from the question instead.
+ */
+function rekeyYesNoChips(chips: QuickReply[], known: AttributeMap, updates: ReportAttribute[], question: string): QuickReply[] {
+  const updated = new Map(updates.map((a) => [a.key, a]))
+  const rename = new Map<string, string>()
+  for (const c of chips) {
+    if (rename.has(c.key) || c.key === 'user_urgency' || !(c.value in YES_NO_VALUES)) continue
+    const a = updated.get(c.key) ?? known[c.key]
+    if (!a || YES_NO_TEXT.test(a.value_en.trim())) continue
+    const k = keyFromQuestion(question)
+    if (k && k !== c.key && !known[k]) rename.set(c.key, k)
+  }
+  return rename.size ? chips.map((c) => (c.value in YES_NO_VALUES && rename.has(c.key) ? { ...c, key: rename.get(c.key)! } : c)) : chips
+}
+
+/** Shared by the streamed early reply and the final parse so both produce the identical spoken text. */
+function cleanReplyPair(rawEn: unknown, rawUr: unknown, strict: boolean): { en: string; ur: string } {
+  const en0 = capWords(str(rawEn), 45)
+  let ur = capWords(str(rawUr), 50)
+  if (!en0 && !ur) throw new Error('intake reply missing')
+  if (ur && !hasUrdu(ur)) {
+    if (strict) throw new Error('intake reply_ur is not in Urdu script')
+    ur = ''
+  }
+  const en = en0 || ur
+  return { en, ur: ur || en }
+}
+
+function sanitizeIntake(raw: unknown, input: IntakeTurnInput, strict: boolean): IntakeTurnResult {
+  if (!raw || typeof raw !== 'object') throw new Error('intake output is not an object')
+  const r = raw as Record<string, unknown>
+  const { en: reply_en, ur: reply_ur } = cleanReplyPair(r.reply_en, r.reply_ur, strict)
+
+  const d = (r.draft && typeof r.draft === 'object' ? r.draft : {}) as Record<string, unknown>
+  const summary_en = str(d.summary_en)
+  const summary_ur = str(d.summary_ur)
+  // prompt asks for <= 8 words; the hard cap is looser so an Urdu headline is never cut mid-phrase
+  const title_en = capWords(str(d.title_en), 12) || capWords(summary_en, 10)
+  const title_ur = capWords(str(d.title_ur), 14) || capWords(summary_ur, 12) || title_en
+  const draft: IntakeDraft = {
+    category: isCategory(d.category) ? d.category : 'other',
+    urgency: isUrgency(d.urgency) ? d.urgency : 'medium',
+    title_en,
+    title_ur,
+    summary_en: summary_en || title_en,
+    summary_ur: summary_ur || title_ur,
+  }
+
+  const updates = attributeUpdates(r.attributes)
+  return {
+    reply_en,
+    reply_ur,
+    quick_replies: rekeyYesNoChips(sanitizeQuickReplies(r.quick_replies), input.attributes ?? {}, updates, reply_en),
+    attributes: mergeAttributes(input.attributes ?? {}, updates, input.quickReply),
+    draft,
+    ready: r.ready === true,
+    emergency: r.emergency === true,
+    ask_photo: r.ask_photo === true && !input.hasImage,
+    off_topic: r.off_topic === true,
+  }
+}
+
+// ----------------------------------------------------------------------- streamed Responses call (intake only)
+
+function scrubSecrets(s: string): string {
+  return s.replace(/sk-[A-Za-z0-9_\-*]{4,}/g, 'sk-***').replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer ***')
+}
+
+interface StreamJsonOpts {
+  timeoutMs: number
+  label: string
+  maxOutputTokens: number
+  effort: 'none' | 'low'
+  /** called with the accumulated output text of the (non-commentary) message after every delta */
+  onText?: (text: string) => void
+}
+
+/**
+ * Responses API, strict json_schema, `stream: true`. Same contract as openai.ts responsesJson (no temperature,
+ * store:false, phase-aware final text via outputText) but text deltas are surfaced while the model writes, so the
+ * caller can start work (TTS) on the first fields before the whole object is done. Deltas of an item whose
+ * phase is "commentary" are ignored (gpt-6-luna effort "none" quirk). No retry here: withFallback switches model.
+ */
+async function responsesJsonStream<T>(
+  model: string,
+  instructions: string,
+  userContent: InputContent[],
+  schemaName: string,
+  schema: Record<string, unknown>,
+  opts: StreamJsonOpts,
+): Promise<{ data: T; usage?: Usage }> {
+  const key = Deno.env.get('OPENAI_API_KEY')?.trim()
+  if (!key) throw new OpenAIError('OPENAI_API_KEY is not configured', 0, 'no_key')
+  const label = opts.label
+  const ctrl = new AbortController()
+  const timeoutErr = new OpenAIError(`openai ${label}: timed out after ${opts.timeoutMs} ms`, 0, 'timeout')
+  const timer = setTimeout(() => ctrl.abort(timeoutErr), opts.timeoutMs)
+  try {
+    let res: Response
+    try {
+      res = await fetch(`${OPENAI_BASE}/responses`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+        body: JSON.stringify({
+          model,
+          instructions,
+          input: [{ role: 'user', content: userContent }],
+          reasoning: { effort: opts.effort },
+          text: { format: { type: 'json_schema', name: schemaName, strict: true, schema } },
+          max_output_tokens: opts.maxOutputTokens,
+          store: false,
+          stream: true,
+        }),
+        signal: ctrl.signal,
+      })
+    } catch (e) {
+      if (ctrl.signal.aborted) throw timeoutErr
+      throw new OpenAIError(`openai ${label}: network error ${scrubSecrets(errText(e))}`, 0, 'network')
+    }
+    if (!res.ok) {
+      let message = res.statusText || 'request failed'
+      let code: string | undefined
+      try {
+        const body = await res.text()
+        try {
+          const j = JSON.parse(body) as { error?: { message?: string; code?: string; type?: string } }
+          if (j.error?.message) message = j.error.message
+          code = j.error?.code ?? j.error?.type ?? undefined
+        } catch {
+          if (body) message = body.slice(0, 300)
+        }
+      } catch { /* unreadable body */ }
+      throw new OpenAIError(`openai ${label} ${res.status}: ${scrubSecrets(message)}`, res.status, code)
+    }
+    if (!res.body) throw new OpenAIError(`openai ${label}: empty stream`, 0, 'empty')
+
+    const phases = new Map<string, string | undefined>()
+    const texts = new Map<string, string>()
+    let final: unknown = null
+    let streamError: OpenAIError | null = null
+    const handle = (data: string) => {
+      if (!data || data === '[DONE]') return
+      let ev: Record<string, unknown>
+      try {
+        ev = JSON.parse(data) as Record<string, unknown>
+      } catch {
+        return
+      }
+      const type = String(ev.type ?? '')
+      if (type === 'response.output_item.added') {
+        const item = ev.item as { id?: string; phase?: string } | undefined
+        if (item?.id) phases.set(item.id, item.phase)
+      } else if (type === 'response.output_text.delta') {
+        const id = String(ev.item_id ?? `#${ev.output_index ?? 0}`)
+        if (phases.get(id) === 'commentary') return
+        const t = (texts.get(id) ?? '') + String(ev.delta ?? '')
+        texts.set(id, t)
+        try {
+          opts.onText?.(t)
+        } catch (e) {
+          console.warn(`[ai] ${label} onText failed`, errText(e))
+        }
+      } else if (type === 'response.completed' || type === 'response.incomplete' || type === 'response.failed') {
+        final = ev.response ?? null
+      } else if (type === 'error') {
+        const err = (ev.error ?? ev) as { message?: string; code?: string }
+        streamError = new OpenAIError(`openai ${label}: stream error ${scrubSecrets(String(err.message ?? ''))}`, 0, err.code ?? 'stream_error')
+      }
+    }
+
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
+    let buf = ''
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += value.replace(/\r/g, '')
+      let cut: number
+      while ((cut = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, cut)
+        buf = buf.slice(cut + 2)
+        handle(block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n'))
+      }
+      if (streamError) throw streamError
+    }
+    if (buf.trim()) handle(buf.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trimStart()).join('\n'))
+    if (streamError) throw streamError
+    if (!final) throw new OpenAIError(`openai ${label}: stream ended without a response`, 0, 'incomplete')
+
+    const resp = final as Parameters<typeof outputText>[0]
+    const text = outputText(resp, label) // phase-aware: final_answer message, never the commentary item
+    try {
+      return { data: JSON.parse(text) as T, usage: resp.usage }
+    } catch {
+      const a = text.indexOf('{')
+      const b = text.lastIndexOf('}')
+      if (a >= 0 && b > a) {
+        try {
+          return { data: JSON.parse(text.slice(a, b + 1)) as T, usage: resp.usage }
+        } catch { /* fall through */ }
+      }
+      throw new OpenAIError(`openai ${label}: output is not valid JSON`, 0, 'bad_json')
+    }
+  } catch (e) {
+    if (e instanceof OpenAIError) throw e
+    if (ctrl.signal.aborted) throw timeoutErr
+    throw new OpenAIError(`openai ${label}: ${scrubSecrets(errText(e))}`)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+const RE_REPLY_EN = /"reply_en"\s*:\s*"((?:[^"\\]|\\.)*)"/
+const RE_REPLY_UR = /"reply_ur"\s*:\s*"((?:[^"\\]|\\.)*)"/
+const RE_FLAG = (name: string) => new RegExp(`"${name}"\\s*:\\s*(true|false)`)
+const RE_EMERGENCY = RE_FLAG('emergency')
+const RE_READY = RE_FLAG('ready')
+const RE_OFF_TOPIC = RE_FLAG('off_topic')
+
+/** The reply as soon as it is complete in the stream (identical to the final reply unless the model is switched). */
+export interface IntakeEarlyReply { en: string; ur: string; emergency: boolean; ready: boolean; off_topic: boolean; model: string }
+
+/**
+ * One intake turn: ONE strict-JSON Responses call (MODELS.reason primary -> fallback), streamed.
+ * `onReply` fires once per model attempt as soon as reply_en + reply_ur are complete (the schema puts them first),
+ * so the caller can run TTS while the draft + attributes are still being written. Turn / ready rules are enforced
+ * by the caller (report-chat), which must compare the final reply with what it already sent to TTS.
+ */
+export async function intakeTurn(
+  input: IntakeTurnInput,
+  opts: { onReply?: (early: IntakeEarlyReply) => void } = {},
+): Promise<{ data: IntakeTurnResult; meta: AiMeta }> {
+  const content: InputContent[] = [{ type: 'input_text', text: buildIntakeInput(input) }]
+  const { value, meta } = await withFallback('intake', MODELS.reason, async (model, isFallback) => {
+    const t0 = Date.now()
+    let fired = false
+    let replyMs = 0
+    const { data, usage } = await responsesJsonStream(model, INTAKE_INSTRUCTIONS, content, 'intake', INTAKE_SCHEMA, {
+      timeoutMs: INTAKE_TIMEOUT_MS,
+      label: `intake:${model}`,
+      maxOutputTokens: 2500,
+      effort: INTAKE_EFFORT,
+      onText: (t) => {
+        if (fired || !opts.onReply) return
+        const en = RE_REPLY_EN.exec(t)
+        const ur = RE_REPLY_UR.exec(t)
+        if (!en || !ur) return
+        fired = true
+        replyMs = Date.now() - t0
+        try {
+          const pair = cleanReplyPair(JSON.parse(`"${en[1]}"`), JSON.parse(`"${ur[1]}"`), !isFallback)
+          opts.onReply({
+            ...pair,
+            emergency: RE_EMERGENCY.exec(t)?.[1] === 'true',
+            ready: RE_READY.exec(t)?.[1] === 'true',
+            off_topic: RE_OFF_TOPIC.exec(t)?.[1] === 'true',
+            model,
+          })
+        } catch { /* invalid early reply: the final parse decides (and may switch model) */ }
+      },
+    })
+    console.log(
+      `[ai] intake ${model} effort=${INTAKE_EFFORT} reply@${replyMs || '-'}ms done@${Date.now() - t0}ms in=${usage?.input_tokens ?? '?'} out=${usage?.output_tokens ?? '?'}`,
+    )
+    return sanitizeIntake(data, input, !isFallback)
+  })
+  return { data: value, meta }
+}
+
+// ======================================================================= extractProfile (Phase 1b voice onboarding)
+
+export interface ProfileExtraction {
+  /** as said, in its original script; null when no name was said */
+  display_name: string | null
+  /** normalised English form, e.g. "G-9/4, Islamabad"; null when no area was said */
+  home_area: string | null
+  /** 'en' / 'ur' (stated preference, else the language they spoke); null when unclear */
+  language: 'ur' | 'en' | null
+  /** Urdu-script renderings for the Urdu read-back sentence (fall back to the originals) */
+  display_name_ur: string | null
+  home_area_ur: string | null
+}
+
+const PROFILE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['display_name', 'display_name_ur', 'home_area', 'home_area_ur', 'language'],
+  properties: {
+    display_name: { type: ['string', 'null'] },
+    display_name_ur: { type: ['string', 'null'] },
+    home_area: { type: ['string', 'null'] },
+    home_area_ur: { type: ['string', 'null'] },
+    language: { type: ['string', 'null'], enum: ['ur', 'en', null] },
+  },
+}
+
+const PROFILE_INSTRUCTIONS = `A phone app in Islamabad / Rawalpindi, Pakistan asked a new user: "Tell us your name and the area you live in." You get their answer: a speech-to-text transcript (may be noisy) or typed text, in Urdu script, Roman Urdu, Punjabi or English. Return JSON:
+- display_name: the person's own name exactly as they gave it, in the SAME script it is written in (Urdu script stays Urdu script; Latin stays Latin, capitalised). Drop "mera naam", "my name is", "main", "hai" and polite words like "ji" / "sahab" unless part of the name. null if they gave no name.
+- display_name_ur: the same name in Urdu script (null if no name).
+- home_area: the area in standard English form "<sector or area>, <city>", e.g. "G-9/4, Islamabad", "F-7 Markaz, Islamabad", "I-8, Islamabad", "Satellite Town, Rawalpindi", "Bahria Town Phase 7, Rawalpindi", "Saddar, Rawalpindi". Islamabad sectors are a letter + number (+ /sub-sector): "جی نائن فور", "G nine four", "g9 4" -> "G-9/4"; "ایف سیون" -> "F-7". Add the city when it is clear (Islamabad sectors A-I letters -> Islamabad). null if they gave no area.
+- home_area_ur: the same area in Urdu script, e.g. "جی نائن فور، اسلام آباد" (null if no area).
+- language: "en" if they spoke English or asked for English; "ur" if they spoke Urdu / Roman Urdu / Punjabi or asked for Urdu; null if unclear.
+Never invent a name or area that was not said. Ignore greetings and filler.`
+
+function cleanField(v: unknown, maxWords: number): string | null {
+  const s = str(v).replace(/^["'“”]+|["'“”.،۔]+$/g, '').trim()
+  if (!s || /^(null|none|unknown|n\/a)$/i.test(s)) return null
+  return capWords(s, maxWords).slice(0, 80)
+}
+
+/** Name + home area + language from the onboarding answer (strict JSON; null for anything not said). */
+export async function extractProfile(text: string, opts: { uiLanguage?: 'ur' | 'en' } = {}): Promise<{ data: ProfileExtraction; meta: AiMeta }> {
+  const said = str(text).slice(0, 1000)
+  if (!said) throw new AiError('profile', 'empty text')
+  const content: InputContent[] = [{
+    type: 'input_text',
+    text: `App language: ${opts.uiLanguage === 'en' ? 'English' : 'Urdu'}\nAnswer: """${said}"""`,
+  }]
+  const { value, meta } = await withFallback('profile', MODELS.reason, async (model) => {
+    const { data } = await responsesJson<Record<string, unknown>>(model, PROFILE_INSTRUCTIONS, content, 'profile', PROFILE_SCHEMA, {
+      timeoutMs: PROFILE_TIMEOUT_MS,
+      label: `profile:${model}`,
+      maxOutputTokens: 800,
+      effort: INTAKE_EFFORT,
+    })
+    if (!data || typeof data !== 'object') throw new Error('profile output is not an object')
+    const display_name = cleanField(data.display_name, 5)
+    const home_area = cleanField(data.home_area, 8)?.replace(/\s*,\s*/g, ', ') ?? null
+    const nameUr = cleanField(data.display_name_ur, 5)
+    const areaUr = cleanField(data.home_area_ur, 8)
+    const result: ProfileExtraction = {
+      display_name,
+      home_area,
+      language: data.language === 'en' || data.language === 'ur' ? data.language : null,
+      display_name_ur: display_name ? (nameUr && hasUrdu(nameUr) ? nameUr : display_name) : null,
+      home_area_ur: home_area ? (areaUr && hasUrdu(areaUr) ? areaUr : home_area) : null,
+    }
+    return result
+  })
+  return { data: value, meta }
 }

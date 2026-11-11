@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { ArrowRight, Eye, EyeOff, KeyRound, Loader2, LogIn, Mail, User, UserPlus, UserRound } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { ROLE_META, SIGNUP_ROLES } from '../components/auth/meta'
+import { ORG_TYPE_META, ROLE_META, SIGNUP_ROLES, type RoleMeta } from '../components/auth/meta'
 import { ErrorBanner, Notice, RoleCard, TextField } from '../components/auth/parts'
 import { AppHeader } from '../components/layout/AppHeader'
 import { Button } from '../components/ui'
@@ -10,9 +10,20 @@ import { homeFor, useAuth } from '../hooks/useAuth'
 import { DEMO_ACCOUNTS, DEMO_PASSWORD, type DemoAccount } from '../lib/demoAccounts'
 import { useI18n } from '../lib/i18n'
 import { supabase } from '../lib/supabase'
-import type { Role } from '../lib/types'
+import type { OrgType, Role } from '../lib/types'
 
 type Tab = 'signin' | 'signup'
+/** Demo quick-login groups, authorities first. */
+const DEMO_GROUPS: Role[] = ['responder', 'ngo', 'citizen', 'admin']
+/** Seeded organisation accounts (scripts/seed.mjs) → their org type, for a recognisable icon + colour. */
+const DEMO_ORG_TYPE: [prefix: string, type: OrgType][] = [
+  ['rescue1122@', 'rescue_1122'], ['fire@', 'fire'], ['police@', 'police'], ['water@', 'water'],
+  ['shelter@', 'shelter'], ['foodbank@', 'food_bank'], ['health@', 'health_ngo'],
+]
+function demoMeta(acc: DemoAccount): RoleMeta {
+  const ot = DEMO_ORG_TYPE.find(([prefix]) => acc.email.startsWith(prefix))?.[1]
+  return ot ? ORG_TYPE_META[ot] : ROLE_META[acc.role]
+}
 type SignupRole = Exclude<Role, 'admin'>
 /** After auth succeeds we wait for the NEW user's profile to load (so role-guarded routes see the right role). */
 interface Pending { uid: string | null; target: 'home' | 'from' | 'signup'; fallbackRole: Role }
@@ -29,8 +40,8 @@ async function currentUid(): Promise<string | null> {
 }
 
 export default function Login() {
-  const { t, pick, lang } = useI18n()
-  const { session, profile, isAnonymous, role, signInWithPassword, signUp, signInAnonymously } = useAuth()
+  const { t, pick } = useI18n()
+  const { session, profile, isAnonymous, role, isOnboarded, signInWithPassword, signUp } = useAuth()
   const nav = useNavigate()
   const loc = useLocation()
   const [params] = useSearchParams()
@@ -53,7 +64,8 @@ export default function Login() {
     const go = (r: Role) => {
       setPending(null)
       setBusy(null)
-      if (pending.target === 'signup') nav(r === 'ngo' || r === 'responder' ? '/org/register' : '/map', { replace: true })
+      // a new citizen account gets the voice onboarding (name + area) first
+      if (pending.target === 'signup') nav(r === 'ngo' || r === 'responder' ? '/org/register' : '/onboarding', { replace: true })
       else if (pending.target === 'from' && from && from !== '/login') nav(from, { replace: true })
       else nav(homeFor(r), { replace: true })
     }
@@ -128,18 +140,11 @@ export default function Login() {
     }
   }
 
-  async function onAnon() {
+  // guests go through the illiterate-first onboarding, which signs in anonymously after the (mock) SMS step
+  function onAnon() {
     setError(null)
-    if (session) { nav(isAnonymous ? '/map' : homeFor(role)); return }
-    setBusy('anon')
-    try {
-      await signInAnonymously()
-      nav('/map', { replace: true })
-    } catch (err) {
-      setError(err)
-    } finally {
-      setBusy(null)
-    }
+    if (session && isOnboarded) { nav(homeFor(role)); return }
+    nav('/onboarding')
   }
 
   const working = busy !== null
@@ -223,7 +228,7 @@ export default function Login() {
         <button type="button" onClick={onAnon} disabled={working}
           className="flex min-h-16 w-full items-center gap-3 rounded-3xl border-2 border-brand-600 bg-brand-50 p-3 text-start transition active:scale-[0.98] disabled:opacity-60">
           <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-2xl bg-brand-700 text-white">
-            {busy === 'anon' ? <Loader2 className="size-6 animate-spin" /> : <CitizenIcon className="size-6" />}
+            <CitizenIcon className="size-6" />
           </span>
           <span className="min-w-0 flex-1">
             <span className="block text-lg font-bold text-brand-900">{t('auth.continueAnon')}</span>
@@ -232,31 +237,44 @@ export default function Login() {
           <ArrowRight className="size-6 shrink-0 text-brand-700 rtl:-scale-x-100" />
         </button>
 
-        {/* demo accounts */}
+        {/* demo accounts, grouped: authorities first (the user wants to watch what each authority receives) */}
         <section className="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200">
           <h2 className="text-lg font-bold">{t('auth.demoTitle')}</h2>
           <p className="mb-3 text-sm text-slate-600">{t('auth.demoHint')}</p>
-          <div className="grid grid-cols-2 gap-2">
-            {DEMO_ACCOUNTS.map((acc) => {
-              const m = ROLE_META[acc.role]
-              const Icon = m.icon
-              const isBusy = busy === acc.email
-              const isCurrent = session?.user.email === acc.email
+          <div className="space-y-4">
+            {DEMO_GROUPS.map((g) => {
+              const accounts = DEMO_ACCOUNTS.filter((a) => a.role === g)
+              if (accounts.length === 0) return null
               return (
-                <button key={acc.email} type="button" onClick={() => onDemo(acc)} disabled={working}
-                  className={clsx(
-                    'flex min-h-16 items-center gap-2 rounded-2xl border-2 p-2 text-start transition active:scale-[0.97] disabled:opacity-60',
-                    isCurrent ? 'shadow-md' : 'border-transparent',
-                  )}
-                  style={{ background: m.soft, borderColor: isCurrent ? m.color : undefined }}>
-                  <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: m.color }}>
-                    {isBusy ? <Loader2 className="size-5 animate-spin" /> : <Icon className="size-5" />}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-bold leading-tight">{pick(acc.label_en, acc.label_ur)}</span>
-                    <span className={clsx('block truncate text-xs text-slate-600', lang === 'ur' && 'font-latin')} lang={lang === 'ur' ? 'en' : 'ur'}>{lang === 'ur' ? acc.label_en : acc.label_ur}</span>
-                  </span>
-                </button>
+                <div key={g}>
+                  <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-slate-500">{t(`auth.demoGroup_${g}`)}</h3>
+                  {g === 'responder' && <p className="mb-2 text-xs text-slate-500">{t('auth.demoAuthoritiesHint')}</p>}
+                  <div className="grid grid-cols-1 gap-2 min-[380px]:grid-cols-2">
+                    {accounts.map((acc) => {
+                      const m = demoMeta(acc)
+                      const Icon = m.icon
+                      const isBusy = busy === acc.email
+                      const isCurrent = session?.user.email === acc.email
+                      return (
+                        <button key={acc.email} type="button" onClick={() => onDemo(acc)} disabled={working}
+                          className={clsx(
+                            'flex min-h-16 items-center gap-2 rounded-2xl border-2 p-2 text-start transition active:scale-[0.97] disabled:opacity-60',
+                            isCurrent ? 'shadow-md' : 'border-transparent',
+                          )}
+                          style={{ background: m.soft, borderColor: isCurrent ? m.color : undefined }}>
+                          <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: m.color }}>
+                            {isBusy ? <Loader2 className="size-5 animate-spin" /> : <Icon className="size-5" />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-bold leading-tight">{pick(acc.label_en, acc.label_ur)}</span>
+                            <span className="font-latin block truncate text-xs text-slate-600" dir="ltr" lang="en">{acc.email}</span>
+                          </span>
+                          {isCurrent && <span className="sr-only">{t('auth.current')}</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
               )
             })}
           </div>

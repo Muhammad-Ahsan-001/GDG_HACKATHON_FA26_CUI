@@ -1,15 +1,19 @@
 // Responder routing: find the right organisations for a cluster (find_responders), create assignments
 // (idempotent on cluster_id + org_id), notify org owners in-app + FCM, stamp clusters.routed_at.
 // escalateCluster() is the shared "after verification" step used by process-report, vote and verify-report.
+// routeToPolice() is the SOS path (docs/CONTRACT-1B.md §SOS): private safety cluster -> nearby police only,
+// regardless of verification, notification type 'sos_alert'. Private clusters never go through the normal routing.
 import { ROUTE_MAX_ORGS } from './config.ts'
 import { parsePoint } from './geocode.ts'
 import { background, HttpError } from './http.ts'
 import {
   type BilingualMessage,
   categoryLabel,
+  type NotificationType,
   notifyNearby,
   notifyReporters,
   notifyUsers,
+  type NotifyResult,
   urgencyLabel,
 } from './notify.ts'
 import { adminClient } from './supabase.ts'
@@ -17,6 +21,10 @@ import type { ReportStatus, RoutedOrg, Urgency } from './types.ts'
 import type { VerifyResult } from './verify.ts'
 
 const HIGH: Urgency[] = ['high', 'critical']
+
+/** SOS notification types (notifications.type is free text; notify.ts's union predates SOS). */
+export const SOS_ALERT = 'sos_alert' as string as NotificationType
+export const SOS_LOGGED = 'sos_logged' as string as NotificationType
 
 interface ClusterRow {
   id: string
@@ -36,10 +44,13 @@ interface ClusterRow {
   safe_until: string | null
   routed_at: string | null
   nearby_notified_at: string | null
+  is_private: boolean | null
+  sos_session_id: string | null
 }
 
 const CLUSTER_COLS = 'id, category, urgency, status, title_en, title_ur, summary_en, summary_ur, centroid, ' +
-  'primary_report_id, report_count, confidence, food_servings, food_type, safe_until, routed_at, nearby_notified_at'
+  'primary_report_id, report_count, confidence, food_servings, food_type, safe_until, routed_at, nearby_notified_at, ' +
+  'is_private, sos_session_id'
 
 async function loadCluster(clusterId: string): Promise<ClusterRow> {
   const { data, error } = await adminClient().from('clusters').select(CLUSTER_COLS).eq('id', clusterId).maybeSingle()
@@ -173,6 +184,8 @@ export async function routeCluster(clusterId: string, opts: { verifiedNow?: bool
   const admin = adminClient()
   const c = await loadCluster(clusterId)
   if (c.status === 'resolved') return await listRouted(clusterId)
+  // private (SOS) clusters are routed to police only, by routeToPolice()
+  if (c.is_private) return await listRouted(clusterId)
   const point = parsePoint(c.centroid)
   if (!point) {
     console.warn('[route] cluster has no parseable centroid', clusterId)
@@ -285,8 +298,10 @@ export async function escalateCluster(
   opts: { excludeReporterIds?: string[] } = {},
 ): Promise<RoutedOrg[]> {
   try {
-    const { data } = await adminClient().from('clusters').select('urgency, status, category, nearby_notified_at')
+    const { data } = await adminClient().from('clusters').select('urgency, status, category, nearby_notified_at, is_private')
       .eq('id', clusterId).maybeSingle()
+    // private (SOS) clusters: no public routing, no nearby alerts, no "verified" broadcasts
+    if ((data as { is_private?: boolean } | null)?.is_private) return await listRouted(clusterId)
     const urgency = ((data as { urgency?: Urgency } | null)?.urgency ?? 'medium') as Urgency
     const status = ((data as { status?: ReportStatus } | null)?.status ?? v.status) as ReportStatus
     const nearbyDone = Boolean((data as { nearby_notified_at?: string | null } | null)?.nearby_notified_at)
@@ -315,5 +330,152 @@ export async function escalateCluster(
   } catch (e) {
     console.error('[route] escalateCluster failed', e instanceof Error ? e.message : e)
     return await listRouted(clusterId).catch(() => [])
+  }
+}
+
+// ======================================================================= SOS (women's safety)
+
+export interface SosAlertText { title_en: string; title_ur: string; body_en: string; body_ur: string }
+
+interface ResponderRow { org_id: string; org_name: string; org_type: string; owner_id: string; distance_m: number }
+
+/**
+ * SOS: alert nearby POLICE for a private safety cluster, regardless of its status / verification.
+ * find_responders(category 'safety') -> police orgs first (other approved safety responders only when no police
+ * org covers the point) -> assignments (idempotent on cluster_id + org_id) -> notifications type 'sos_alert' for
+ * the org owners (awaited, so realtime fires now) + FCM push in the background -> clusters.routed_at.
+ * Orgs already alerted for the cluster are not re-notified (use notifyPolice() for follow-up updates).
+ * Returns every organisation routed for the cluster (existing + new); `pushed` = device tokens targeted.
+ */
+export async function routeToPolice(
+  clusterId: string,
+  opts: { title_en: string; title_ur: string; body_en: string; body_ur: string },
+): Promise<RoutedOrg[]> {
+  const t0 = performance.now()
+  const admin = adminClient()
+  const c = await loadCluster(clusterId)
+  const point = parsePoint(c.centroid)
+  if (!point) {
+    console.error('[route] SOS cluster has no parseable centroid', clusterId)
+    return await listRouted(clusterId)
+  }
+
+  const [respRes, existingRes] = await Promise.all([
+    admin.rpc('find_responders', { p_lat: point.lat, p_lng: point.lng, p_category: 'safety', p_limit: 10 }),
+    admin.from('assignments').select('id, org_id, status, distance_m').eq('cluster_id', clusterId),
+  ])
+  if (respRes.error) console.error('[route] SOS find_responders failed', respRes.error.message)
+  if (existingRes.error) console.error('[route] SOS assignments lookup failed', existingRes.error.message)
+  const candidates = (respRes.data ?? []) as ResponderRow[]
+  const police = candidates.filter((r) => r.org_type === 'police')
+  if (!police.length && candidates.length) {
+    console.warn('[route] SOS: no police org covers the point; alerting other approved safety responders', clusterId)
+  }
+  if (!candidates.length) console.error('[route] SOS: NO safety responder covers', clusterId, point)
+  const responders = (police.length ? police : candidates).slice(0, ROUTE_MAX_ORGS)
+  const existing = (existingRes.data ?? []) as { id: string; org_id: string; status: string; distance_m: number | null }[]
+  const existingIds = new Set(existing.map((a) => a.org_id))
+
+  const toInsert = responders.filter((r) => !existingIds.has(r.org_id))
+  let inserted: { id: string; org_id: string; distance_m: number | null }[] = []
+  if (toInsert.length) {
+    const { data, error } = await admin.from('assignments')
+      .upsert(
+        toInsert.map((r) => ({
+          cluster_id: clusterId,
+          report_id: c.primary_report_id,
+          org_id: r.org_id,
+          status: 'alerted',
+          distance_m: Math.round(r.distance_m ?? 0),
+          note: 'SOS alert',
+        })),
+        { onConflict: 'cluster_id,org_id', ignoreDuplicates: true },
+      )
+      .select('id, org_id, distance_m')
+    if (error) console.error('[route] SOS assignments upsert failed', error.message)
+    inserted = (data ?? []) as typeof inserted
+  }
+
+  const orgInfo = await orgsById([...new Set([...existing.map((a) => a.org_id), ...inserted.map((a) => a.org_id)])])
+  for (const r of responders) {
+    if (!orgInfo.has(r.org_id)) orgInfo.set(r.org_id, { id: r.org_id, name: r.org_name, org_type: r.org_type, owner_id: r.owner_id })
+  }
+
+  const pushedByOrg = new Map<string, number>()
+  await Promise.all(inserted.map(async (a) => {
+    const org = orgInfo.get(a.org_id)
+    if (!org?.owner_id) return
+    const d = km(a.distance_m)
+    const msg: BilingualMessage = {
+      title_en: opts.title_en,
+      title_ur: opts.title_ur,
+      body_en: [opts.body_en, d.en ? `${d.en} from you` : ''].filter(Boolean).join(' · '),
+      body_ur: [opts.body_ur, d.ur ? `آپ سے ${d.ur}` : ''].filter(Boolean).join(' · '),
+    }
+    const res = await notifyUsers([org.owner_id], SOS_ALERT, msg, {
+      cluster_id: clusterId,
+      report_id: c.primary_report_id,
+      url: '/dashboard',
+      data: {
+        assignment_id: a.id, org_id: a.org_id, category: 'safety', urgency: 'critical', status: c.status,
+        sos: true, sos_session_id: c.sos_session_id,
+      },
+    })
+    pushedByOrg.set(a.org_id, res.tokens)
+  }))
+
+  if (inserted.length && !c.routed_at) {
+    const { error } = await admin.from('clusters').update({ routed_at: new Date().toISOString() })
+      .eq('id', clusterId).is('routed_at', null)
+    if (error) console.warn('[route] SOS routed_at update failed', error.message)
+  }
+
+  const all = [
+    ...existing.map((a) => ({ org_id: a.org_id, distance_m: a.distance_m })),
+    ...inserted.filter((a) => !existingIds.has(a.org_id)).map((a) => ({ org_id: a.org_id, distance_m: a.distance_m })),
+  ]
+  const result: RoutedOrg[] = all
+    .map((a) => ({
+      org_id: a.org_id,
+      org_name: orgInfo.get(a.org_id)?.name ?? '',
+      org_type: orgInfo.get(a.org_id)?.org_type ?? '',
+      distance_m: Math.round(a.distance_m ?? 0),
+      pushed: pushedByOrg.get(a.org_id) ?? 0,
+    }))
+    .sort((x, y) => x.distance_m - y.distance_m)
+  console.log(JSON.stringify({
+    fn: 'route_sos', cluster_id: clusterId, candidates: candidates.length, police: police.length, existing: existing.length,
+    inserted: inserted.length, ms: Math.round(performance.now() - t0),
+  }))
+  return result
+}
+
+/**
+ * Follow-up message to every organisation alerted for a (SOS) cluster, e.g. "User marked themselves safe" or
+ * "live location updated". Default type 'sos_alert', link /dashboard. Never throws.
+ */
+export async function notifyPolice(
+  clusterId: string,
+  msg: SosAlertText,
+  opts: { type?: string; data?: Record<string, string | number | boolean | null | undefined>; includeResolved?: boolean } = {},
+): Promise<NotifyResult> {
+  try {
+    const { data, error } = await adminClient().from('assignments').select('org_id, status').eq('cluster_id', clusterId)
+    if (error) {
+      console.warn('[route] notifyPolice assignments lookup failed', error.message)
+      return { notified: 0, tokens: 0 }
+    }
+    const rows = ((data ?? []) as { org_id: string; status: string }[])
+      .filter((a) => opts.includeResolved || a.status !== 'resolved')
+    const orgs = await orgsById([...new Set(rows.map((a) => a.org_id))])
+    const owners = [...orgs.values()].map((o) => o.owner_id)
+    return await notifyUsers(owners, (opts.type ?? 'sos_alert') as NotificationType, msg, {
+      cluster_id: clusterId,
+      url: '/dashboard',
+      data: { category: 'safety', sos: true, ...(opts.data ?? {}) },
+    })
+  } catch (e) {
+    console.error('[route] notifyPolice failed', e instanceof Error ? e.message : e)
+    return { notified: 0, tokens: 0 }
   }
 }

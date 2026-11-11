@@ -1,14 +1,16 @@
 // Responder dashboard map — Leaflet + OpenStreetMap (shared BaseMap layer; no API key needed).
 import L from 'leaflet'
-import { Building2 } from 'lucide'
+import { Building2, Siren } from 'lucide'
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
-import { Circle, Marker, Tooltip, useMap } from 'react-leaflet'
+import { Circle, Marker, Polyline, Tooltip, useMap } from 'react-leaflet'
 import { config } from '../../config'
 import { CATEGORY_META } from '../../lib/categories'
 import { useI18n } from '../../lib/i18n'
 import { BaseMap, InvalidateOnResize } from '../leaflet/BaseMap'
 import { pinIcon, svg } from '../leaflet/icons'
+import { SOS_RED } from './SosCard'
 import type { DashAssignment, MapFocus } from './types'
+import { isSos, type SosLive } from './useSosLive'
 
 export interface ServiceArea {
   id: string
@@ -32,6 +34,11 @@ export interface DashboardMapProps {
   ready: boolean
   onSelect: (assignmentId: string) => void
   onBackgroundClick?: () => void
+  /** live SOS sessions (session id -> state): SOS markers sit at the live location and move with it */
+  sosLive?: ReadonlyMap<string, SosLive>
+  /** keep the camera on this point (SOS "follow"); a manual drag calls onFollowCancel */
+  follow?: MapFocus | null
+  onFollowCancel?: () => void
 }
 
 const BRAND = '#0f766e'
@@ -45,9 +52,29 @@ const hqIcon = L.divIcon({
   iconAnchor: [16, 16],
 })
 
+/** SOS marker: red siren badge with two expanding rings and an "SOS" tag. Styles: dashboard.css (.awz-sos-*). */
+const sosIconCache = new Map<string, L.DivIcon>()
+function sosIcon(selected: boolean, quiet: boolean): L.DivIcon {
+  const key = `${selected ? 1 : 0}${quiet ? 1 : 0}`
+  const hit = sosIconCache.get(key)
+  if (hit) return hit
+  const s = selected ? 64 : 54
+  const icon = L.divIcon({
+    html: `<div class="awz-sos-pin${quiet ? ' awz-sos-quiet' : ''}" style="--sos:${SOS_RED};--s:${s}px">`
+      + '<span class="awz-sos-ring"></span><span class="awz-sos-ring awz-sos-ring-2"></span>'
+      + `<span class="awz-sos-body">${svg(Siren as unknown as IconNode, Math.round(s * 0.48), '#fff', 2.4)}</span>`
+      + '<span class="awz-sos-tag">SOS</span></div>',
+    className: 'awz-pin-wrap',
+    iconSize: [s, s],
+    iconAnchor: [s / 2, s / 2],
+  })
+  sosIconCache.set(key, icon)
+  return icon
+}
+
 /** Responder map: category-coloured markers, service-area circle, pan-to-selection. */
 export function DashboardMap({
-  items, selectedId, highlightIds, areas, focus, fitKey, ready, onSelect, onBackgroundClick,
+  items, selectedId, highlightIds, areas, focus, fitKey, ready, onSelect, onBackgroundClick, sosLive, follow, onFollowCancel,
 }: DashboardMapProps) {
   const { t, pick, lang } = useI18n()
   // uncontrolled camera: only the initial centre matters
@@ -85,6 +112,18 @@ export function DashboardMap({
       {markers.map(({ a, highlighted }) => {
         const cat = CATEGORY_META[a.category] ?? CATEGORY_META.other
         const title = pick(a.title_en, a.title_ur) || (lang === 'ur' ? cat.ur : cat.en)
+        if (isSos(a)) {
+          return (
+            <SosMarker
+              key={a.cluster_id}
+              a={a}
+              live={a.sos_session_id ? sosLive?.get(a.sos_session_id) : undefined}
+              label={`${t('dashboard.sosLabel')} - ${title}`}
+              selected={a.cluster_id === selectedCluster}
+              onSelect={onSelect}
+            />
+          )
+        }
         return (
           <IncidentMarker
             key={a.cluster_id}
@@ -96,7 +135,15 @@ export function DashboardMap({
           />
         )
       })}
-      <CameraController focus={focus} fitKey={fitKey} ready={ready} areas={areas} items={items} />
+      <CameraController
+        focus={focus}
+        fitKey={fitKey}
+        ready={ready}
+        areas={areas}
+        items={items}
+        follow={follow ?? null}
+        onFollowCancel={onFollowCancel}
+      />
     </BaseMap>
   )
 }
@@ -136,6 +183,54 @@ const IncidentMarker = memo(function IncidentMarker({ a, label, selected, highli
   )
 })
 
+interface SosMarkerProps {
+  a: DashAssignment
+  live: SosLive | undefined
+  label: string
+  selected: boolean
+  onSelect: (assignmentId: string) => void
+}
+
+/** SOS: marker at the live location (moves with every update) + GPS accuracy circle + the trail seen so far. */
+const SosMarker = memo(function SosMarker({ a, live, label, selected, onSelect }: SosMarkerProps) {
+  const onSelectRef = useRef(onSelect)
+  onSelectRef.current = onSelect
+  const id = a.assignment_id
+  const handlers = useMemo(() => ({ click: () => onSelectRef.current(id) }), [id])
+  const lat = live?.lat ?? a.lat
+  const lng = live?.lng ?? a.lng
+  const ended = a.status === 'resolved' || live?.status === 'safe' || live?.status === 'cancelled'
+  const acc = live?.last_accuracy_m ?? null
+  const trail = live?.trail ?? []
+  return (
+    <>
+      {trail.length > 1 && (
+        <Polyline
+          positions={trail}
+          interactive={false}
+          pathOptions={{ color: SOS_RED, weight: 3, opacity: 0.7, dashArray: '6 6' }}
+        />
+      )}
+      {acc != null && acc > 0 && acc <= 1500 && (
+        <Circle
+          center={[lat, lng]}
+          radius={acc}
+          interactive={false}
+          pathOptions={{ color: SOS_RED, weight: 1, opacity: 0.6, fillColor: SOS_RED, fillOpacity: 0.1 }}
+        />
+      )}
+      <Marker
+        position={[lat, lng]}
+        icon={sosIcon(selected, ended)}
+        title={label}
+        alt={label}
+        zIndexOffset={ended ? 5000 : 50_000}
+        eventHandlers={handlers}
+      />
+    </>
+  )
+})
+
 /** Service-area circle + a small HQ marker at the centre. */
 function ServiceAreaOverlay({ area, label }: { area: ServiceArea; label: string }) {
   return (
@@ -156,10 +251,33 @@ function ServiceAreaOverlay({ area, label }: { area: ServiceArea; label: string 
 }
 
 function CameraController({
-  focus, fitKey, ready, areas, items,
-}: { focus: MapFocus | null; fitKey: string; ready: boolean; areas: ServiceArea[]; items: DashAssignment[] }) {
+  focus, fitKey, ready, areas, items, follow, onFollowCancel,
+}: {
+  focus: MapFocus | null; fitKey: string; ready: boolean; areas: ServiceArea[]; items: DashAssignment[]
+  follow: MapFocus | null; onFollowCancel?: () => void
+}) {
   const map = useMap()
   const fittedRef = useRef<string | null>(null)
+
+  // follow mode: keep the moving SOS marker in view (zoom in once, then just pan)
+  const followLat = follow?.lat
+  const followLng = follow?.lng
+  const following = followLat !== undefined && followLng !== undefined
+  useEffect(() => {
+    if (followLat === undefined || followLng === undefined) return
+    if (map.getZoom() < 15) map.flyTo([followLat, followLng], 16, { duration: 0.6 })
+    else map.panTo([followLat, followLng], { animate: true, duration: 0.5 })
+  }, [map, followLat, followLng])
+
+  // dragging the map by hand ends follow mode
+  const cancelRef = useRef(onFollowCancel)
+  cancelRef.current = onFollowCancel
+  useEffect(() => {
+    if (!following) return
+    const onDrag = () => cancelRef.current?.()
+    map.on('dragstart', onDrag)
+    return () => { map.off('dragstart', onDrag) }
+  }, [map, following])
 
   useEffect(() => {
     if (!ready || fittedRef.current === fitKey) return

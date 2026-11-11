@@ -1,6 +1,8 @@
 // Client-side media helpers for the report flow: image compression + Supabase Storage uploads.
 // Buckets (docs/CONTRACT.md §1): report-audio (private) at `<auth uid>/<client_id>.<ext>`,
 // report-images (public) at `<client_id>/<n>.jpg`.
+// Intake conversation (CONTRACT-1B): each voice turn at `report-audio/<uid>/<session>-<n>.<ext>`,
+// photos at `report-images/<session>/<n>.jpg` (n never reused within a session, so removed photos can't collide).
 import { supabase } from './supabase'
 
 export const AUDIO_BUCKET = 'report-audio'
@@ -164,4 +166,17 @@ export async function uploadAudio(blob: Blob, mime: string, clientId: string): P
 export async function uploadImages(blobs: Blob[], clientId: string): Promise<string[]> {
   await currentUserId() // insert policy requires an authenticated session
   return Promise.all(blobs.map((b, n) => putObject(IMAGE_BUCKET, `${clientId}/${n}.jpg`, b, 'image/jpeg')))
+}
+
+/** One voice turn of the intake conversation: `report-audio/<uid>/<sessionId>-<n>.<ext>`; returns the storage path. */
+export async function uploadVoiceTurn(blob: Blob, mime: string, sessionId: string, n: number): Promise<string> {
+  const uid = await currentUserId()
+  const type = baseMime(mime || blob.type) || 'audio/webm'
+  return putObject(AUDIO_BUCKET, `${uid}/${sessionId}-${n}.${extFromMime(type)}`, blob, type)
+}
+
+/** One compressed JPEG at `report-images/<folder>/<n>.jpg` (upload as soon as it is picked); returns the path. */
+export async function uploadImage(blob: Blob, folder: string, n: number): Promise<string> {
+  await currentUserId() // insert policy requires an authenticated session
+  return putObject(IMAGE_BUCKET, `${folder}/${n}.jpg`, blob, 'image/jpeg')
 }

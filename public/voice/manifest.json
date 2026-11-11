@@ -44,5 +44,11 @@
   "ur/offlineQueued": "21b7836400a1c002",
   "en/offlineQueued": "6dba0a3dc885f5e3",
   "ur/tryAgain": "7968ca510057a7d1",
-  "en/tryAgain": "a08bb177e6a70604"
+  "en/tryAgain": "a08bb177e6a70604",
+  "ur/phoneInvalid": "11db714fe8412c08",
+  "en/phoneInvalid": "d83db36d6aba2a9e",
+  "ur/codeWrong": "20030d6c71be0a30",
+  "en/codeWrong": "744e977f3ba72eb9",
+  "ur/profileRetry": "9820ff7ccc92d297",
+  "en/profileRetry": "5d663c2542518a3c"
 }

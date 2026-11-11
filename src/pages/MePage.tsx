@@ -9,9 +9,13 @@ import { ListenButton } from '../components/auth/ListenButton'
 import { ROLE_META } from '../components/auth/meta'
 import { ErrorBanner, Notice } from '../components/auth/parts'
 import { AppHeader } from '../components/layout/AppHeader'
+import { AttributeChips } from '../components/report/AttributeChips'
+import { SOS_RED } from '../components/sos/meta'
+import { SosPanel } from '../components/sos/SosPanel'
 import { AiLabel, Button, CategoryIcon, EmptyState, Spinner, StatusBadge, UrgencyBadge, useTimeAgo } from '../components/ui'
 import { useAuth } from '../hooks/useAuth'
 import { api } from '../lib/api'
+import type { AttributeMap } from '../lib/attributes'
 import { CATEGORY_META } from '../lib/categories'
 import { useI18n } from '../lib/i18n'
 import { enablePush, pushSupported } from '../lib/push'
@@ -23,11 +27,19 @@ import type { AppNotification, MyReport, ReportStatus } from '../lib/types'
 const REPORT_COLS = [
   'id', 'cluster_id', 'category', 'urgency', 'status', 'title_en', 'title_ur', 'summary_en', 'summary_ur', 'transcript',
   'language', 'address_text', 'created_at', 'confidence', 'ai_reason', 'is_spam', 'spam_reason', 'food_servings',
-  'safe_until', 'input_modes',
+  'safe_until', 'input_modes', 'attributes',
 ] as const
 const REPORT_SELECT = REPORT_COLS.join(', ')
+/** Same without the Phase-1b `attributes` column (used once a database without it answers 42703). */
+const REPORT_SELECT_LEGACY = REPORT_COLS.filter((c) => c !== 'attributes').join(', ')
+let reportSelect = REPORT_SELECT
+function isMissingColumn(e: { code?: string; message?: string } | null): boolean {
+  return Boolean(e && (e.code === '42703' || /column .*attributes/i.test(e.message ?? '')))
+}
 /** Own report row; cluster_id is null for reports rejected as spam. */
-type ReportRow = Omit<MyReport, 'cluster_id'> & { cluster_id: string | null; spam_reason: string | null }
+type ReportRow = Omit<MyReport, 'cluster_id'> & {
+  cluster_id: string | null; spam_reason: string | null; attributes?: AttributeMap | null
+}
 
 function pickReport(raw: Record<string, unknown>): Partial<ReportRow> {
   const out: Record<string, unknown> = {}
@@ -282,6 +294,7 @@ function ReportCard({ r, flash, onOpen }: { r: ReportRow; flash: boolean; onOpen
         ) : (
           <>
             {summary && <p className="mt-2 line-clamp-2 text-sm text-slate-700">{summary}</p>}
+            <AttributeChips attributes={r.attributes} compact max={4} className="mt-2" />
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <StatusBadge status={r.status} />
               <UrgencyBadge urgency={r.urgency} />
@@ -316,6 +329,8 @@ const NOTIF_ICON: Record<string, { icon: LucideIcon; color: string }> = {
   nearby_alert: { icon: Radar, color: CATEGORY_META.hazard.color },
   food_alert: { icon: CATEGORY_META.food.icon, color: CATEGORY_META.food.color },
   verified: { icon: STATUS_META.verified.icon, color: STATUS_META.verified.color },
+  sos_logged: { icon: ShieldAlert, color: SOS_RED },
+  sos_alert: { icon: ShieldAlert, color: SOS_RED },
 }
 
 function notifVisual(n: AppNotification) {
@@ -389,11 +404,18 @@ export default function MePage() {
   useEffect(() => {
     if (!uid) return
     let alive = true
+    const loadReports = (cols: string) =>
+      supabase.from('reports').select(cols).eq('reporter_id', uid).order('created_at', { ascending: false }).limit(50)
     void (async () => {
-      const [r, n] = await Promise.all([
-        supabase.from('reports').select(REPORT_SELECT).eq('reporter_id', uid).order('created_at', { ascending: false }).limit(50),
+      const [r0, n] = await Promise.all([
+        loadReports(reportSelect),
         supabase.from('notifications').select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(40),
       ])
+      let r = r0
+      if (r.error && reportSelect !== REPORT_SELECT_LEGACY && isMissingColumn(r.error)) {
+        reportSelect = REPORT_SELECT_LEGACY
+        r = await loadReports(reportSelect)
+      }
       if (!alive) return
       if (r.error) setError(r.error)
       setReports((r.data as unknown as ReportRow[] | null) ?? [])
@@ -421,7 +443,7 @@ export default function MePage() {
         const existing = reportsRef.current?.find((x) => x.id === id)
         if (!existing) {
           // new report (e.g. submitted from another tab): fetch the clean row
-          void supabase.from('reports').select(REPORT_SELECT).eq('id', id).maybeSingle().then(({ data }) => {
+          void supabase.from('reports').select(reportSelect).eq('id', id).maybeSingle().then(({ data }) => {
             if (data) setReports((prev) => (prev?.some((x) => x.id === id) ? prev : [data as unknown as ReportRow, ...(prev ?? [])]))
           })
           return
@@ -500,6 +522,9 @@ export default function MePage() {
             </Button>
           </div>
         )}
+
+        {/* women's safety SOS: hold-to-start button, how it works, triggers, my SOS log */}
+        <SosPanel uid={uid} notifications={notifs} />
 
         {/* alert settings */}
         <section className="rounded-3xl bg-white px-3 py-1 shadow-sm ring-1 ring-slate-200" aria-label={t('auth.settings')}>

@@ -1,3 +1,4 @@
+import { SosTriggers } from '../sos/SosTriggers'
 import { InstallPrompt } from './InstallPrompt'
 import { OfflineBanner } from './OfflineBanner'
 import { PushSync } from './PushSync'
@@ -12,6 +13,8 @@ export function PwaLayer() {
   return (
     <>
       <PushSync />
+      {/* SOS (women's safety): volume-key ×3 and opt-in shake triggers → /sos */}
+      <SosTriggers />
       <div className="pointer-events-none fixed inset-x-0 top-0 z-[70] flex flex-col items-center gap-2 px-3 pt-[max(0.5rem,env(safe-area-inset-top))]">
         <OfflineBanner />
         <UpdatePrompt />

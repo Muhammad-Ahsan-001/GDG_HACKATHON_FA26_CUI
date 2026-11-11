@@ -57,6 +57,14 @@ export default defineConfig({
         ],
         shortcuts: [
           {
+            // women's safety: long-press the app icon → SOS (listens quietly, alerts police on a threat)
+            name: 'SOS',
+            short_name: 'SOS',
+            description: 'Emergency SOS: listen quietly and alert police if a threat is heard',
+            url: '/sos?trigger=shortcut',
+            icons: [{ src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' }],
+          },
+          {
             name: 'Report by voice',
             short_name: 'Voice report',
             description: 'Record a voice note about a problem near you',

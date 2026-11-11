@@ -55,3 +55,45 @@ export function vibrate(): void {
     /* not allowed (no user activation) */
   }
 }
+
+/**
+ * SOS alarm: a loud two-tone "hi-lo" siren (~3 s), unmistakably different from the normal two-beep alert.
+ * Square wave through a low-pass filter: piercing on cheap phone speakers without clipping.
+ */
+export function siren(durationS = 3): void {
+  const c = audioContext()
+  if (!c) return
+  try {
+    if (c.state === 'suspended') void c.resume().catch(() => { /* locked */ })
+    const t0 = c.currentTime + 0.02
+    const end = t0 + durationS
+    const osc = c.createOscillator()
+    const lowpass = c.createBiquadFilter()
+    const gain = c.createGain()
+    osc.type = 'square'
+    lowpass.type = 'lowpass'
+    lowpass.frequency.value = 2600
+    const step = 0.34
+    for (let i = 0, t = t0; t < end; i++, t += step) osc.frequency.setValueAtTime(i % 2 ? 740 : 988, t)
+    gain.gain.setValueAtTime(0.0001, t0)
+    gain.gain.exponentialRampToValueAtTime(0.55, t0 + 0.04)
+    gain.gain.setValueAtTime(0.55, end - 0.1)
+    gain.gain.exponentialRampToValueAtTime(0.0001, end)
+    osc.connect(lowpass)
+    lowpass.connect(gain)
+    gain.connect(c.destination)
+    osc.start(t0)
+    osc.stop(end + 0.02)
+  } catch {
+    /* ignore audio errors */
+  }
+}
+
+/** Long, insistent SOS vibration (distinct from the short new-alert buzz). */
+export function vibrateSos(): void {
+  try {
+    if (typeof navigator.vibrate === 'function') navigator.vibrate([700, 150, 700, 150, 1100])
+  } catch {
+    /* not allowed (no user activation) */
+  }
+}

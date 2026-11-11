@@ -12,10 +12,13 @@ import { useI18n } from '../../lib/i18n'
 import { STATUS_META } from '../../lib/status'
 import { supabase } from '../../lib/supabase'
 import type { Lang, MapPin, PublicReport, VoteType } from '../../lib/types'
+import { AttributeChips } from '../report/AttributeChips'
 import {
   AiLabel, CategoryIcon, EmptyState, Sheet, Spinner, StatusBadge, UrgencyBadge, useTimeAgo,
 } from '../ui'
+import { VoiceGuide } from '../voice/VoiceGuide'
 import { useFormatDistance } from './useFormatDistance'
+import { UserUrgencyBadge } from './UserUrgencyBadge'
 
 /** Same value as the server's VERIFY_THRESHOLD — used only to colour the confidence bar. */
 const VERIFIED_AT = 0.7
@@ -271,6 +274,7 @@ function PinSheetBody({ clusterId, onClose, pin: livePin, userLocation }: PinShe
   const isFood = pin.category === 'food' || pin.food_servings != null || pin.safe_until != null
   const canVote = pin.status !== 'resolved'
   const voteDisabled = Boolean(voting) || isOwn || !session
+  const hasAttributes = Boolean(pin.attributes && Object.keys(pin.attributes).length)
 
   return (
     <Sheet
@@ -292,6 +296,7 @@ function PinSheetBody({ clusterId, onClose, pin: livePin, userLocation }: PinShe
         {/* status row */}
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={pin.status} count={pin.report_count} />
+          <UserUrgencyBadge value={pin.user_urgency} />
           <UrgencyBadge urgency={pin.urgency} className="py-1 text-sm" />
           <span className="inline-flex items-center gap-1 text-sm text-slate-600">
             <Clock className="size-4" />
@@ -304,6 +309,18 @@ function PinSheetBody({ clusterId, onClose, pin: livePin, userLocation }: PinShe
             </span>
           )}
         </div>
+
+        {/* what reporters told the AI intake (danger first) */}
+        {hasAttributes && (
+          <section aria-label={t('map.whatWeKnow')}>
+            <div className="mb-1.5 flex items-center gap-2">
+              <h3 className="text-sm font-bold text-slate-700">{t('map.whatWeKnow')}</h3>
+              {/* attributes were structured by the intake AI from what reporters said */}
+              <AiLabel />
+            </div>
+            <AttributeChips attributes={pin.attributes} />
+          </section>
+        )}
 
         {/* AI assessment */}
         <section className="rounded-2xl border border-violet-100 bg-violet-50/60 p-3">
@@ -380,6 +397,12 @@ function PinSheetBody({ clusterId, onClose, pin: livePin, userLocation }: PinShe
         )}
 
         {/* confirm / dispute */}
+        {canVote && (
+          <div className="-mb-1 flex items-center gap-2">
+            <VoiceGuide prompt="pinVerify" size={48} label={false} />
+            <p className="min-w-0 flex-1 text-base font-bold text-ink">{t('map.verifyAsk')}</p>
+          </div>
+        )}
         {canVote && (
           <div className="grid grid-cols-2 gap-3">
             <button
@@ -506,13 +529,15 @@ function ReportRow({ report }: { report: PublicReport }) {
         })}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-slate-500">{timeAgo(report.created_at)}</span>
+          <UserUrgencyBadge value={report.user_urgency} size="sm" />
           {report.is_mine && (
             <span className="rounded-full bg-brand-700 px-2 py-0.5 text-xs font-bold text-white">{t('map.yours')}</span>
           )}
         </div>
         {text && <p className="mt-0.5 line-clamp-3 text-sm text-ink">{text}</p>}
+        <AttributeChips attributes={report.attributes} compact max={4} className="mt-1.5" />
       </div>
       {report.photo_url && (
         <img src={report.photo_url} alt={t('map.photoAlt')} loading="lazy" decoding="async" className="size-14 shrink-0 rounded-xl bg-slate-100 object-cover" />

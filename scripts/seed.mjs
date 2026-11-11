@@ -122,11 +122,11 @@ const DEMO_ZONE_CLEARANCE_M = 700
 
 // ------------------------------------------------------------------ people
 const PEOPLE = {
-  'citizen1@awaaz.demo': { name: 'Ayesha', language: 'ur', trust: 0.6 },
-  'citizen2@awaaz.demo': { name: 'Bilal', language: 'ur', trust: 0.6 },
-  'citizen3@awaaz.demo': { name: 'Hina', language: 'ur', trust: 0.8 },
-  'citizen4@awaaz.demo': { name: 'Usman', language: 'en', trust: 0.7 },
-  'citizen5@awaaz.demo': { name: 'Zainab', language: 'ur', trust: 0.5 },
+  'citizen1@awaaz.demo': { name: 'Ayesha', language: 'ur', trust: 0.6, home_area: 'G-9/4, Islamabad' },
+  'citizen2@awaaz.demo': { name: 'Bilal', language: 'ur', trust: 0.6, home_area: 'G-9/3, Islamabad' },
+  'citizen3@awaaz.demo': { name: 'Hina', language: 'ur', trust: 0.8, home_area: 'F-7, Islamabad' },
+  'citizen4@awaaz.demo': { name: 'Usman', language: 'en', trust: 0.7, home_area: 'I-8, Islamabad' },
+  'citizen5@awaaz.demo': { name: 'Zainab', language: 'ur', trust: 0.5, home_area: 'Satellite Town, Rawalpindi' },
 }
 const ACCOUNTS = [
   ...DEMO_ACCOUNTS,
@@ -138,6 +138,7 @@ const ACCOUNTS = [
   display_name: PEOPLE[a.email]?.name ?? a.label_en,
   language: PEOPLE[a.email]?.language ?? 'en',
   trust: PEOPLE[a.email]?.trust ?? 0.8,
+  home_area: PEOPLE[a.email]?.home_area ?? null,
 }))
 
 // short aliases used in the data below
@@ -752,6 +753,9 @@ async function ensureUsers() {
     language: a.language,
     is_demo: true,
     trust_score: a.trust,
+    // Phase 1b: demo accounts skip the voice onboarding (service role may set onboarded_at)
+    home_area: a.home_area,
+    onboarded_at: iso(NOW),
   })), { onConflict: 'id' }), 'profiles upsert')
 
   return { ids, created }

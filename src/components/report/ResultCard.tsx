@@ -2,15 +2,21 @@ import clsx from 'clsx'
 import { BellRing, ChevronDown, Clock, Ear, Hourglass, Layers, Loader2, MapPin, MapPinPlus, Plus, Users, Utensils, Volume2, VolumeX } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
+import type { AttributeMap } from '../../lib/attributes'
 import { useI18n } from '../../lib/i18n'
 import { supabase } from '../../lib/supabase'
 import type { ProcessReportResponse } from '../../lib/types'
 import { AiLabel, CategoryIcon, StatusBadge, UrgencyBadge } from '../ui'
+import { AttributeChips } from './AttributeChips'
 import { orgMeta } from './orgMeta'
 
 /** Success screen after process-report: what the AI understood, where it went, who was alerted. */
-export function ResultCard({ res, onSeeMap, onNew }: {
-  res: ProcessReportResponse; onSeeMap: () => void; onNew: () => void
+export function ResultCard({ res, attributes, onSeeMap, onNew }: {
+  res: ProcessReportResponse
+  /** details gathered in the intake conversation */
+  attributes?: AttributeMap | null
+  onSeeMap: () => void
+  onNew: () => void
 }) {
   const { t, pick, lang } = useI18n()
   const [count, setCount] = useState<number | null>(null)
@@ -53,6 +59,7 @@ export function ResultCard({ res, onSeeMap, onNew }: {
           <ListenButton text={summary || title} />
         </div>
         {summary && <p className="mt-2 text-slate-700" dir="auto">{summary}</p>}
+        <AttributeChips attributes={attributes} className="mt-3" />
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <StatusBadge status={res.status} />
           <span className="font-latin text-xs text-slate-500" dir="ltr">{t('common.confidence', { n: Math.round(res.confidence * 100) })}</span>

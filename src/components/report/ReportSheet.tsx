@@ -1,60 +1,79 @@
+import './report.css'
 import clsx from 'clsx'
 import {
-  Camera, Check, CircleAlert, CloudAlert, CloudOff, Keyboard, LogIn, MapPin, MapPinned, MapPinOff, Megaphone, Mic,
-  PencilLine, RotateCcw, Send, ShieldAlert, WifiOff, type LucideIcon,
+  Camera, CircleAlert, CloudAlert, CloudOff, Images, Loader2, LogIn, Megaphone, PencilLine, RotateCcw, ShieldAlert,
+  WifiOff, type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useGeolocation, type GeoFix } from '../../hooks/useGeolocation'
-import { useRecorder } from '../../hooks/useRecorder'
+import { classifyTake, useRecorder, type TakeResult } from '../../hooks/useRecorder'
 import { api, ApiError } from '../../lib/api'
-import { useI18n } from '../../lib/i18n'
-import { MediaUploadError, newClientId, uploadAudio, uploadImages } from '../../lib/media'
-import type { Category, ProcessReportRequest, ProcessReportResponse } from '../../lib/types'
+import type { AttributeMap, ChatTurn, IntakeDraft, QuickReply, UserUrgency } from '../../lib/attributes'
+import { translate, useI18n } from '../../lib/i18n'
+import { MAX_PHOTOS, MediaUploadError, newClientId, uploadImage, uploadVoiceTurn } from '../../lib/media'
+import type { ProcessReportRequest, ProcessReportResponse } from '../../lib/types'
+import { VOICE_PROMPTS, buzz, playPrompt, playUrl, stopVoice, type VoicePromptId } from '../../lib/voice/player'
 import { Sheet } from '../ui'
-import { CategoryHints } from './CategoryHints'
-import { LocationChip } from './LocationChip'
-import { PhotoPanel } from './PhotoPanel'
+import { VoiceGuide } from '../voice/VoiceGuide'
+import { ChatThread, bubbleKey } from './ChatThread'
+import { Composer, type Hint } from './Composer'
+import { EmergencyCountdown } from './EmergencyCountdown'
+import {
+  asCategory, classifyError, hintsFromBody, isSendChip, isUserUrgency, msgId, sleep, urgencyAttribute,
+  urgencyFromAttributes, type ErrKind, type Msg,
+} from './intake'
+import { KnowCard, UrgencyPicker } from './KnowCard'
+import { LocationChip, type LocKind } from './LocationChip'
+import { LocationStep, type PickedLoc } from './LocationStep'
 import { ProgressSteps, type StepKey } from './ProgressSteps'
 import { ResultCard } from './ResultCard'
-import { usePhotoDraft } from './usePhotoDraft'
-import { VoicePanel } from './VoicePanel'
+import { usePhotoDraft, type DraftPhoto } from './usePhotoDraft'
 
-type Panel = 'voice' | 'photo' | 'text'
-type ErrKind = 'offline' | 'network' | 'server' | 'upload' | 'auth'
 type Phase =
-  | { kind: 'compose' }
+  | { kind: 'chat' }
+  | { kind: 'location' }
   | { kind: 'submitting'; steps: StepKey[]; active: number }
-  | { kind: 'result'; res: ProcessReportResponse }
+  | { kind: 'result'; res: ProcessReportResponse; attributes: AttributeMap }
   | { kind: 'rejected'; rejected: NonNullable<ProcessReportResponse['rejected']> }
   | { kind: 'needs_location'; hints: string[] }
   | { kind: 'error'; error: ErrKind; detail?: string }
 
+/** One user turn before it is sent to report-chat (kept for retries). */
+type TurnInput =
+  | { kind: 'voice'; take: TakeResult; n?: number; path?: string; upload?: Promise<string> }
+  | { kind: 'text'; text: string }
+  | { kind: 'chip'; chip: QuickReply }
+
+/** process-report request; the Phase-1b intake fields (conversation, attributes, user_urgency, ...) live in types.ts. */
+type SubmitRequest = ProcessReportRequest
+
+const TURN_MAX_MS = 90_000
+/** answers to a follow-up ("haan", "nahi") are short; the first description needs >= 1 s of voice */
+const FOLLOWUP_MIN_VOICED_MS = 400
+/** emergencies: accept "Aag lagi hai!" */
+const EMERGENCY_MIN_VOICED_MS = 300
+const GPS_WAIT_MS = 4000
+const HINT_MS = 9000
+const MIN_TEXT = 2
 /** How long each simulated step stays "running" while the single process-report request is in flight. */
 const STEP_MS: Partial<Record<StepKey, number>> = { listen: 3500, understand: 4500, duplicates: 3000 }
-const GPS_WAIT_MS = 4000
-const MIN_TEXT = 2
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const greeting = (): Msg => ({
+  id: msgId('greet'), role: 'ai', kind: 'greeting',
+  en: VOICE_PROMPTS.reportVoice.en, ur: VOICE_PROMPTS.reportVoice.ur, prompt: 'reportVoice',
+})
 
-function classifyError(e: unknown): ErrKind {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'offline'
-  if (e instanceof MediaUploadError) return e.code === 'network' ? 'network' : e.code === 'auth' ? 'auth' : 'upload'
-  if (e instanceof ApiError) {
-    if (e.status === 401) return 'auth'
-    // FunctionsFetchError / FunctionsRelayError: no HTTP response body reached us
-    if (e.body === undefined && /send a request|fetch|network|relay|load failed/i.test(e.message)) return 'network'
-    return 'server'
-  }
-  if (e instanceof TypeError) return 'network'
-  return 'server'
+/** Stable callback that always runs the latest closure (memoised children keep their props). */
+function useStable<A extends unknown[], R>(fn: (...a: A) => R): (...a: A) => R {
+  const ref = useRef(fn)
+  useLayoutEffect(() => { ref.current = fn })
+  return useCallback((...a: A) => ref.current(...a), [])
 }
 
-function hintsFromBody(body: unknown): string[] {
-  const b = body as { needs_location?: { hints?: unknown }; hints?: unknown } | undefined
-  const h = b?.needs_location?.hints ?? b?.hints
-  return Array.isArray(h) ? h.filter((x): x is string => typeof x === 'string') : []
-}
-
+/**
+ * The report flow as a short spoken conversation with the AI intake (report-chat), then process-report.
+ * Props are the Phase-1 ones the MapPage uses.
+ */
 export function ReportSheet(props: {
   open: boolean
   mode: 'voice' | 'photo' | 'text'
@@ -64,95 +83,163 @@ export function ReportSheet(props: {
 }) {
   const { open, mode, onClose, mapCenter, onDone } = props
   const { t, lang, pick } = useI18n()
-  const rec = useRecorder({ maxMs: 90_000 })
   const photos = usePhotoDraft()
   const geo = useGeolocation()
+  const onAutoStopRef = useRef<(r: TakeResult | null) => void>(() => undefined)
+  const onAutoStop = useCallback((r: TakeResult | null) => onAutoStopRef.current(r), [])
+  const rec = useRecorder({ maxMs: TURN_MAX_MS, onAutoStop })
 
-  const [panel, setPanel] = useState<Panel>(mode)
-  const [phase, setPhase] = useState<Phase>({ kind: 'compose' })
+  const [phase, setPhase] = useState<Phase>({ kind: 'chat' })
+  const [msgs, setMsgs] = useState<Msg[]>(() => [greeting()])
+  const [attributes, setAttributes] = useState<AttributeMap>({})
+  const [knowVersion, setKnowVersion] = useState(0)
+  const [draft, setDraft] = useState<IntakeDraft | null>(null)
+  const [quick, setQuick] = useState<QuickReply[]>([])
+  const [ready, setReady] = useState(false)
+  const [askPhoto, setAskPhoto] = useState(false)
+  const [photoWanted, setPhotoWanted] = useState(false)
+  const [userUrgency, setUserUrgency] = useState<UserUrgency | null>(null)
+  const [thinking, setThinking] = useState(false)
+  const [countdown, setCountdown] = useState(false)
+  const [sendQueued, setSendQueued] = useState(false)
+  const [picked, setPicked] = useState<PickedLoc | null>(null)
+  const [hint, setHint] = useState<Hint | null>(null)
+  const [textOpen, setTextOpen] = useState(mode === 'text')
   const [text, setText] = useState('')
-  const [address, setAddress] = useState('')
-  const [addressOpen, setAddressOpen] = useState(false)
-  const [categoryHint, setCategoryHint] = useState<Category | null>(null)
-  const [autoCamera, setAutoCamera] = useState(false)
-  const [needInput, setNeedInput] = useState(false)
 
-  const textRef = useRef<HTMLTextAreaElement>(null)
-  const addressRef = useRef<HTMLInputElement>(null)
-  const locatePromise = useRef<Promise<GeoFix | null> | null>(null)
-  /** last attempt that failed in transit: retrying the SAME draft reuses its client_id (server is idempotent) */
-  const attempt = useRef<{ clientId: string; sig: string } | null>(null)
-  const audioCache = useRef<{ blob: Blob; path: string } | null>(null)
-  const imageCache = useRef<{ key: string; paths: string[] } | null>(null)
-  const blobIds = useRef(new WeakMap<Blob, number>())
-  const blobSeq = useRef(0)
+  // ---- refs: the source of truth inside async flows ----
+  const sessionRef = useRef(newClientId())
+  const history = useRef<ChatTurn[]>([])
+  const attrsRef = useRef<AttributeMap>({})
+  const urgencyRef = useRef<UserUrgency | null>(null)
+  const thinkingRef = useRef(false)
+  const countdownRef = useRef(false)
+  const countdownCancelled = useRef(false)
+  const emergencyPending = useRef(false)
+  const submitAfterTurn = useRef(false)
   const busy = useRef(false)
+  const voiceSeq = useRef(0)
+  const photoSeq = useRef(0)
+  const photoHintShown = useRef(false)
+  const audioPaths = useRef<string[]>([])
+  const photoUploads = useRef(new Map<string, Promise<string>>())
+  const photoDone = useRef(new Map<string, string>())
+  const failedTurns = useRef(new Map<string, TurnInput>())
+  /** emergency content captured before any conversation: sent straight to process-report */
+  const direct = useRef<{ id: string; input: TurnInput } | null>(null)
+  const pickedRef = useRef<PickedLoc | null>(null)
+  const draftRef = useRef<IntakeDraft | null>(null)
+  const draftVersion = useRef(0)
+  /** last submit that failed in transit: retrying the SAME draft reuses its client_id (server is idempotent) */
+  const attempt = useRef<{ clientId: string; version: number } | null>(null)
+  const locatePromise = useRef<Promise<GeoFix | null> | null>(null)
   const stepTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cameraInput = useRef<HTMLInputElement>(null)
+  const galleryInput = useRef<HTMLInputElement>(null)
   const wasOpen = useRef(false)
   const openRef = useRef(open)
   const resultSeen = useRef(false)
   const phaseRef = useRef<Phase>(phase)
+  const photosRef = useRef<DraftPhoto[]>(photos.photos)
+  const geoRef = useRef(geo)
+  const recStateRef = useRef(rec.state)
 
-  const { reset: resetRecorder, stop: stopRecorder } = rec
+  useLayoutEffect(() => {
+    phaseRef.current = phase
+    photosRef.current = photos.photos
+    geoRef.current = geo
+    recStateRef.current = rec.state
+  })
+
+  const { reset: resetRecorder, finish: finishTake, start: startTake } = rec
   const { locate } = geo
   const clearPhotos = photos.clear
-  const photoCount = photos.photos.length
+  const micBlocked = rec.state === 'denied' || rec.state === 'unsupported'
 
-  const resetDraft = useCallback(() => {
-    resetRecorder()
-    clearPhotos()
-    setText('')
-    setAddress('')
-    setAddressOpen(false)
-    setCategoryHint(null)
-    setNeedInput(false)
-    attempt.current = null
-    audioCache.current = null
-    imageCache.current = null
-  }, [resetRecorder, clearPhotos])
+  // ---------------------------------------------------------------- helpers
+  const appendMsg = (m: Msg) => setMsgs((prev) => [...prev, m])
+  const updateMsg = (id: string, patch: Partial<Msg>) =>
+    setMsgs((prev) => prev.map((m) => (m.id === id ? ({ ...m, ...patch } as Msg) : m)))
 
-  useEffect(() => { phaseRef.current = phase }, [phase])
+  const hasUserTurn = () => history.current.some((h) => h.role === 'user')
+  const hasContent = () => hasUserTurn() || photosRef.current.length > 0 || direct.current !== null
 
-  // open / close transitions
-  useEffect(() => {
-    openRef.current = open
-    if (open && !wasOpen.current) {
-      if (phaseRef.current.kind === 'result') {
-        if (resultSeen.current) { resetDraft(); setPhase({ kind: 'compose' }) }
-        else resultSeen.current = true // finished while the sheet was closed: show it now
-      }
-      setPanel(mode)
-      setAutoCamera(mode === 'photo' && photoCount === 0)
-      locatePromise.current = locate()
-    }
-    // closing keeps the take (or cancels a start still waiting for mic permission)
-    if (!open && wasOpen.current) void stopRecorder()
-    wasOpen.current = open
-  }, [open, mode, locate, photoCount, resetDraft, stopRecorder])
-
-  // the map may switch the mode while the sheet is already open
-  useEffect(() => { if (open) setPanel(mode) }, [open, mode])
-
-  // text mode: put the cursor in the box straight away
-  useEffect(() => {
-    if (open && panel === 'text' && phase.kind === 'compose') textRef.current?.focus({ preventScroll: true })
-  }, [open, panel, phase.kind])
-
-  useEffect(() => () => { if (stepTimer.current) clearTimeout(stepTimer.current) }, [])
-
-  const onAutoOpened = useCallback(() => setAutoCamera(false), [])
-
-  const choosePanel = (p: Panel) => {
-    if (p !== 'voice' && rec.state === 'recording') void rec.stop() // keep the take, don't record hidden
-    setPanel(p)
-    setNeedInput(false)
+  const lastNotice = useRef<{ prompt: VoicePromptId; at: number } | null>(null)
+  const notice = (prompt: VoicePromptId, tone: Hint['tone'] = 'warn', sound = true) => {
+    setHint({ prompt, tone })
+    const now = Date.now()
+    const repeat = lastNotice.current?.prompt === prompt && now - lastNotice.current.at < 1500
+    lastNotice.current = { prompt, at: now }
+    if (repeat) return // the same problem reported twice in a row (e.g. recorder error + its callback)
+    if (sound && openRef.current) void playPrompt(prompt, lang)
+    buzz([60, 80, 60])
   }
 
-  const blobId = (b: Blob | null) => {
-    if (!b) return 0
-    let id = blobIds.current.get(b)
-    if (!id) { id = ++blobSeq.current; blobIds.current.set(b, id) }
-    return id
+  const speak = (id: string, url: string | undefined, fallback?: VoicePromptId) => {
+    if (!openRef.current || recStateRef.current === 'recording') return
+    if (url) void playUrl(url, bubbleKey(id))
+    else if (fallback) void playPrompt(fallback, lang)
+  }
+
+  const setUrgency = (u: UserUrgency | null) => {
+    urgencyRef.current = u
+    setUserUrgency(u)
+    const next = { ...attrsRef.current }
+    if (u) next.user_urgency = urgencyAttribute(u)
+    else delete next.user_urgency
+    attrsRef.current = next
+    setAttributes(next)
+    draftVersion.current++
+  }
+
+  const applyAttributes = (incoming: AttributeMap | undefined) => {
+    const next: AttributeMap = { ...(incoming ?? attrsRef.current) }
+    const u = urgencyRef.current
+    if (u) next.user_urgency = urgencyAttribute(u) // the user's own choice always wins
+    attrsRef.current = next
+    setAttributes(next)
+    setKnowVersion((v) => v + 1)
+  }
+
+  const currentPoint = (): { lat: number; lng: number } | null => {
+    if (pickedRef.current) return pickedRef.current
+    const g = geoRef.current
+    return g.state === 'ok' && g.fix ? { lat: g.fix.lat, lng: g.fix.lng } : null
+  }
+
+  const ensurePhotoUpload = (p: DraftPhoto): Promise<string> => {
+    let pr = photoUploads.current.get(p.id)
+    if (!pr) {
+      const sid = sessionRef.current
+      pr = uploadImage(p.blob, sid, photoSeq.current++)
+      photoUploads.current.set(p.id, pr)
+      const mine = pr
+      pr.then(
+        (path) => { if (sessionRef.current === sid) photoDone.current.set(p.id, path) },
+        () => { if (photoUploads.current.get(p.id) === mine) photoUploads.current.delete(p.id) },
+      )
+    }
+    return pr
+  }
+
+  /** Paths of the current photos; `strict` waits for (and retries) every upload and throws on failure. */
+  const photoPaths = async (strict: boolean): Promise<string[]> => {
+    const list = photosRef.current
+    if (!strict) return list.map((p) => photoDone.current.get(p.id)).filter((x): x is string => Boolean(x))
+    return Promise.all(list.map((p) => ensurePhotoUpload(p)))
+  }
+
+  const voicePath = async (input: Extract<TurnInput, { kind: 'voice' }>): Promise<string> => {
+    if (input.path) return input.path
+    input.n ??= ++voiceSeq.current
+    try {
+      input.upload ??= uploadVoiceTurn(input.take.blob, input.take.mime, sessionRef.current, input.n)
+      input.path = await input.upload
+      return input.path
+    } catch (e) {
+      input.upload = undefined
+      throw e
+    }
   }
 
   const stopStepTimer = () => {
@@ -163,8 +250,7 @@ export function ReportSheet(props: {
   const runStepTimer = (steps: StepKey[], from: number) => {
     stopStepTimer()
     const schedule = (i: number) => {
-      const key = steps[i]
-      const ms = STEP_MS[key]
+      const ms = STEP_MS[steps[i]]
       if (i >= steps.length - 1 || !ms) return // last step keeps spinning until the response arrives
       stepTimer.current = setTimeout(() => {
         setPhase((p) => (p.kind === 'submitting' ? { ...p, active: Math.max(p.active, i + 1) } : p))
@@ -174,275 +260,739 @@ export function ReportSheet(props: {
     schedule(from)
   }
 
-  const hasText = text.trim().length >= MIN_TEXT
-  const hasInput = rec.state === 'recording' || Boolean(rec.blob) || photos.photos.length > 0 || hasText
+  const newSession = () => {
+    sessionRef.current = newClientId()
+    resetRecorder()
+    clearPhotos()
+    photosRef.current = []
+    photoUploads.current.clear()
+    photoDone.current.clear()
+    history.current = []
+    audioPaths.current = []
+    failedTurns.current.clear()
+    direct.current = null
+    attrsRef.current = {}
+    urgencyRef.current = null
+    thinkingRef.current = false
+    countdownRef.current = false
+    countdownCancelled.current = false
+    emergencyPending.current = false
+    submitAfterTurn.current = false
+    voiceSeq.current = 0
+    photoSeq.current = 0
+    photoHintShown.current = false
+    pickedRef.current = null
+    draftRef.current = null
+    attempt.current = null
+    draftVersion.current++
+    setMsgs([greeting()])
+    setAttributes({})
+    setKnowVersion(0)
+    setDraft(null)
+    setQuick([])
+    setReady(false)
+    setAskPhoto(false)
+    setPhotoWanted(false)
+    setUserUrgency(null)
+    setThinking(false)
+    setCountdown(false)
+    setSendQueued(false)
+    setPicked(null)
+    setHint(null)
+    setText('')
+  }
 
-  const submit = async (opts: { forceMap?: boolean } = {}) => {
-    if (busy.current) return
-    busy.current = true
+  // ---------------------------------------------------------------- countdown (emergency)
+  const startCountdown = () => {
+    if (countdownRef.current || busy.current || phaseRef.current.kind !== 'chat') return
+    countdownRef.current = true
+    setCountdown(true)
+  }
+
+  const cancelCountdown = () => {
+    countdownRef.current = false
+    countdownCancelled.current = true
+    emergencyPending.current = false
+    setCountdown(false)
+    // what was captured for the direct emergency send becomes the first conversation turn
+    const d = direct.current
+    if (d) {
+      direct.current = null
+      if (d.input.kind === 'text' || d.input.kind === 'voice') void sendTurn(d.input, d.id)
+    }
+  }
+
+  const onCountdownDone = () => {
+    countdownRef.current = false
+    setCountdown(false)
+    void submit()
+  }
+
+  // ---------------------------------------------------------------- one conversation turn
+  const sendTurn = async (input: TurnInput, retryId?: string) => {
+    if (thinkingRef.current) return
+    const sid = sessionRef.current
+    const id = retryId ?? msgId('u')
+    const label = input.kind === 'chip' ? pick(input.chip.label_en, input.chip.label_ur) : undefined
+    if (retryId) updateMsg(id, { status: 'sending' })
+    else if (input.kind === 'voice') appendMsg({ id, role: 'user', kind: 'voice', status: 'sending', durationMs: input.take.durationMs })
+    else if (input.kind === 'text') appendMsg({ id, role: 'user', kind: 'text', status: 'sending', text: input.text })
+    else appendMsg({ id, role: 'user', kind: 'chip', status: 'sending', chip: input.chip, text: label })
+    const prevQuick = quick
+    setQuick([])
+    setHint(null)
+    thinkingRef.current = true
+    setThinking(true)
+    draftVersion.current++
     try {
-      // one tap = stop the running take and send it
-      let audioBlob = rec.blob
-      let audioMime = rec.mime
-      if (rec.state === 'recording') {
-        audioBlob = await rec.stop()
-        audioMime = audioBlob?.type || audioMime
+      const audio_path = input.kind === 'voice' ? await voicePath(input) : undefined
+      const point = currentPoint()
+      const image_paths = await photoPaths(false)
+      const res = await api.reportChat({
+        session_id: sid,
+        ui_language: lang,
+        history: history.current,
+        attributes: attrsRef.current,
+        audio_path,
+        text: input.kind === 'text' ? input.text : undefined,
+        quick_reply: input.kind === 'chip' ? { key: input.chip.key, value: input.chip.value } : undefined,
+        image_paths: image_paths.length ? image_paths : undefined,
+        lat: point?.lat,
+        lng: point?.lng,
+      })
+      if (sessionRef.current !== sid) return
+      failedTurns.current.delete(id)
+
+      if (res.no_speech) {
+        updateMsg(id, { status: 'unheard' })
+        const aiId = msgId('a')
+        appendMsg({
+          id: aiId, role: 'ai', kind: 'unheard',
+          en: res.reply?.en || VOICE_PROMPTS.noSpeech.en, ur: res.reply?.ur || VOICE_PROMPTS.noSpeech.ur,
+          audioUrl: res.reply_audio_url, prompt: 'noSpeech',
+        })
+        setQuick(prevQuick)
+        buzz([60, 80, 60])
+        speak(aiId, res.reply_audio_url, 'noSpeech')
+        if (submitAfterTurn.current) {
+          submitAfterTurn.current = false
+          setSendQueued(false)
+          if (hasContent()) queueMicrotask(() => { void submit() })
+        }
+        return
       }
-      const body = text.trim()
-      const addr = address.trim()
-      const shots = photos.photos
-      if (!audioBlob && shots.length === 0 && body.length < MIN_TEXT) { setNeedInput(true); return }
-      setNeedInput(false)
 
-      const steps: StepKey[] = ['upload', ...(audioBlob ? (['listen'] as const) : []), 'understand', 'duplicates', 'pin']
-      setPhase({ kind: 'submitting', steps, active: 0 })
+      const at = new Date().toISOString()
+      const userText = input.kind === 'voice' ? (res.transcript ?? '').trim() : input.kind === 'text' ? input.text : (label ?? input.chip.value)
+      const turns: ChatTurn[] = [...history.current, { role: 'user', text: userText, at, ...(audio_path ? { audio_path } : {}) }]
+      const replyText = pick(res.reply?.en, res.reply?.ur)
+      if (replyText) {
+        turns.push({
+          role: 'ai', text: replyText, text_alt: (lang === 'ur' ? res.reply.en : res.reply.ur) || undefined, at,
+          ...(res.reply_audio_url ? { audio_url: res.reply_audio_url } : {}),
+        })
+      }
+      history.current = turns
+      if (audio_path) audioPaths.current.push(audio_path)
+      updateMsg(id, { status: 'done', text: userText || undefined })
 
-      try {
-        // --- location: GPS > typed address (server geocodes) > map centre
-        let fix = geo.state === 'ok' ? geo.fix : null
-        if (!fix && geo.state === 'locating' && locatePromise.current) {
+      applyAttributes(res.attributes)
+      draftRef.current = res.draft ?? null
+      setDraft(draftRef.current)
+      setReady(Boolean(res.ready))
+      setAskPhoto(Boolean(res.ask_photo) && photosRef.current.length < MAX_PHOTOS)
+      setQuick(Array.isArray(res.quick_replies) ? res.quick_replies.slice(0, 4) : [])
+      if (!urgencyRef.current) {
+        const u = urgencyFromAttributes(res.attributes ?? {})
+        if (u) { urgencyRef.current = u; setUserUrgency(u) }
+      }
+
+      let aiId: string | null = null
+      if (replyText) {
+        aiId = msgId('a')
+        appendMsg({ id: aiId, role: 'ai', kind: 'reply', en: res.reply.en, ur: res.reply.ur, audioUrl: res.reply_audio_url })
+      }
+
+      if (submitAfterTurn.current) {
+        submitAfterTurn.current = false
+        setSendQueued(false)
+        queueMicrotask(() => { void submit() })
+        return
+      }
+      if ((res.emergency || urgencyRef.current === 'emergency') && !countdownCancelled.current) startCountdown()
+      if (aiId) speak(aiId, res.reply_audio_url)
+    } catch {
+      if (sessionRef.current !== sid) return
+      failedTurns.current.set(id, input)
+      updateMsg(id, { status: 'failed' })
+      setQuick(prevQuick)
+      if (submitAfterTurn.current) { submitAfterTurn.current = false; setSendQueued(false) }
+      notice('tryAgain')
+    } finally {
+      if (sessionRef.current === sid) {
+        thinkingRef.current = false
+        setThinking(false)
+      }
+    }
+  }
+
+  /** Emergency before any conversation: show the content, start the countdown, send it straight to process-report. */
+  const startDirect = (input: TurnInput) => {
+    const id = msgId('u')
+    if (input.kind === 'voice') {
+      void voicePath(input).catch(() => undefined) // upload during the countdown; submit retries on failure
+      appendMsg({ id, role: 'user', kind: 'voice', status: 'done', durationMs: input.take.durationMs })
+    } else if (input.kind === 'text') {
+      appendMsg({ id, role: 'user', kind: 'text', status: 'done', text: input.text })
+    } else return
+    direct.current = { id, input }
+    emergencyPending.current = false
+    draftVersion.current++
+    if (submitAfterTurn.current) {
+      submitAfterTurn.current = false
+      setSendQueued(false)
+      void submit()
+      return
+    }
+    startCountdown()
+  }
+
+  // ---------------------------------------------------------------- voice
+  const onTake = (r: TakeResult | null, opts: { emergency?: boolean } = {}) => {
+    resetRecorder() // the take now lives in the turn
+    const thenSubmit = submitAfterTurn.current
+    const giveUpSubmit = () => {
+      if (!thenSubmit) return
+      submitAfterTurn.current = false
+      setSendQueued(false)
+      if (hasContent()) void submit()
+    }
+    if (!r) { notice('tryAgain'); giveUpSubmit(); return }
+    const isDirect = (emergencyPending.current || opts.emergency) && history.current.length === 0 && !direct.current
+    const minVoicedMs = isDirect || opts.emergency ? EMERGENCY_MIN_VOICED_MS : hasUserTurn() ? FOLLOWUP_MIN_VOICED_MS : undefined
+    const verdict = classifyTake(r, { minVoicedMs })
+    if (verdict === 'silent') { notice('noSpeech'); giveUpSubmit(); return }
+    if (verdict === 'too_short') { notice('tooShort'); giveUpSubmit(); return }
+    setHint(null)
+    if (isDirect) { startDirect({ kind: 'voice', take: r }); return }
+    void sendTurn({ kind: 'voice', take: r }) // urgency is 'emergency' now: the countdown starts after the AI heard it
+  }
+  useLayoutEffect(() => { onAutoStopRef.current = (r) => onTake(r) })
+
+  const onMic = useStable(async () => {
+    if (recStateRef.current === 'recording') { onTake(await finishTake()); return }
+    if (thinkingRef.current || busy.current || countdownRef.current) return
+    stopVoice() // never record the AI talking
+    setHint(null)
+    await startTake()
+  })
+
+  const onCancelRec = useStable(() => {
+    resetRecorder()
+    if (submitAfterTurn.current) { submitAfterTurn.current = false; setSendQueued(false) }
+  })
+
+  // ---------------------------------------------------------------- urgency, chips, text
+  const chooseUrgency = (u: UserUrgency, chip?: QuickReply) => {
+    setUrgency(u)
+    buzz(25)
+    if (u === 'emergency') {
+      countdownCancelled.current = false
+      if (recStateRef.current === 'recording') { void finishTake().then((r) => onTake(r, { emergency: true })); return }
+      if (hasContent()) { startCountdown(); return }
+      emergencyPending.current = true
+      if (micBlocked) setTextOpen(true)
+      else void onMic()
+      return
+    }
+    emergencyPending.current = false
+    if (chip && history.current.length > 0) void sendTurn({ kind: 'chip', chip })
+  }
+  const onPickUrgency = useStable((u: UserUrgency) => chooseUrgency(u))
+
+  const onChip = useStable((q: QuickReply) => {
+    if (isSendChip(q)) { void submit(); return }
+    if (q.key === 'user_urgency' && isUserUrgency(q.value)) { chooseUrgency(q.value, q); return }
+    void sendTurn({ kind: 'chip', chip: q })
+  })
+
+  const onSendText = useStable(() => {
+    const v = text.trim()
+    if (v.length < MIN_TEXT || thinkingRef.current) return
+    setText('')
+    if (emergencyPending.current && history.current.length === 0 && !direct.current) { startDirect({ kind: 'text', text: v }); return }
+    void sendTurn({ kind: 'text', text: v })
+  })
+
+  const onRetry = useStable((id: string) => {
+    const input = failedTurns.current.get(id)
+    if (input) void sendTurn(input, id)
+  })
+
+  // ---------------------------------------------------------------- photos
+  const openCamera = useStable(() => { stopVoice(); cameraInput.current?.click() })
+  const openGallery = useStable(() => { stopVoice(); galleryInput.current?.click() })
+
+  const onPhotoFiles = async (el: HTMLInputElement) => {
+    const files = el.files ? Array.from(el.files) : []
+    el.value = '' // allow picking the same file again after removing it
+    if (!files.length) return
+    const added = await photos.add(files)
+    if (!added.length) return
+    added.forEach((p) => { void ensurePhotoUpload(p).catch(() => undefined) })
+    appendMsg({ id: msgId('p'), role: 'user', kind: 'photo', status: 'done', photoIds: added.map((p) => p.id) })
+    setAskPhoto(false)
+    setPhotoWanted(false)
+    draftVersion.current++
+    if (emergencyPending.current && history.current.length === 0) {
+      emergencyPending.current = false
+      startCountdown()
+      return
+    }
+    if (!hasUserTurn() && !direct.current && !photoHintShown.current) {
+      photoHintShown.current = true
+      const id = msgId('a')
+      appendMsg({ id, role: 'ai', kind: 'photo_hint', en: translate('en', 'report.photoHint'), ur: translate('ur', 'report.photoHint') })
+    }
+  }
+
+  const onRemovePhoto = useStable((id: string) => {
+    photos.remove(id)
+    photoUploads.current.delete(id)
+    photoDone.current.delete(id)
+    draftVersion.current++
+  })
+
+  // ---------------------------------------------------------------- submit (process-report)
+  const submit = async (opts: { loc?: PickedLoc } = {}) => {
+    if (busy.current) return
+    if (recStateRef.current === 'recording') {
+      // one tap = finish the running take, let the AI hear it, then send
+      submitAfterTurn.current = true
+      setSendQueued(true)
+      onTake(await finishTake())
+      return
+    }
+    if (thinkingRef.current) { submitAfterTurn.current = true; setSendQueued(true); return }
+    if (!hasContent()) return
+    busy.current = true
+    countdownRef.current = false
+    submitAfterTurn.current = false
+    setCountdown(false)
+    setSendQueued(false)
+    setHint(null)
+    stopVoice()
+    const d = direct.current?.input
+    const directVoice = d?.kind === 'voice' && history.current.length === 0
+    const steps: StepKey[] = ['upload', ...(directVoice ? (['listen'] as const) : []), 'understand', 'duplicates', 'pin']
+    setPhase({ kind: 'submitting', steps, active: 0 })
+    void playPrompt('reportSending', lang)
+
+    try {
+      // --- location: chosen spot > GPS > let the server geocode what was said (it answers needs_location if it can't)
+      const chosen = opts.loc ?? pickedRef.current
+      let fix: GeoFix | null = null
+      if (!chosen) {
+        const g = geoRef.current
+        fix = g.state === 'ok' ? g.fix : null
+        if (!fix && g.state === 'locating' && locatePromise.current) {
           fix = await Promise.race([locatePromise.current, sleep(GPS_WAIT_MS).then(() => null)])
         }
-        let loc: Pick<ProcessReportRequest, 'lat' | 'lng' | 'accuracy_m' | 'location_source'>
-        if (opts.forceMap) loc = { lat: mapCenter.lat, lng: mapCenter.lng, location_source: 'map' }
-        else if (fix) loc = { lat: fix.lat, lng: fix.lng, accuracy_m: Math.round(fix.accuracy), location_source: 'gps' }
-        else if (addr) loc = {}
-        else loc = { lat: mapCenter.lat, lng: mapCenter.lng, location_source: 'map' }
-
-        // --- idempotency key
-        const sig = [blobId(audioBlob), shots.map((p) => p.id).join(','), body, addr, categoryHint ?? ''].join('|')
-        const clientId = attempt.current?.sig === sig ? attempt.current.clientId : newClientId()
-        attempt.current = { clientId, sig }
-
-        if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new MediaUploadError('network', 'offline')
-
-        // --- uploads (skipped for media already uploaded by an earlier attempt)
-        const imageKey = shots.map((p) => p.id).join(',')
-        const [audio_path, image_paths] = await Promise.all([
-          !audioBlob ? Promise.resolve(undefined)
-            : audioCache.current?.blob === audioBlob ? Promise.resolve(audioCache.current.path)
-              : uploadAudio(audioBlob, audioMime, clientId).then((path) => { audioCache.current = { blob: audioBlob, path }; return path }),
-          shots.length === 0 ? Promise.resolve(undefined)
-            : imageCache.current?.key === imageKey ? Promise.resolve(imageCache.current.paths)
-              : uploadImages(shots.map((p) => p.blob), clientId).then((paths) => { imageCache.current = { key: imageKey, paths }; return paths }),
-        ])
-
-        setPhase((p) => (p.kind === 'submitting' ? { ...p, active: 1 } : p))
-        runStepTimer(steps, 1)
-
-        const res = await api.processReport({
-          client_id: clientId,
-          text: body || undefined,
-          audio_path,
-          image_paths,
-          ...loc,
-          address_text: addr || undefined,
-          language: 'auto',
-          ui_language: lang,
-          category_hint: categoryHint ?? undefined,
-        })
-        stopStepTimer()
-        setPhase((p) => (p.kind === 'submitting' ? { ...p, active: p.steps.length } : p))
-        await sleep(450) // let the last tick land
-
-        attempt.current = null
-        if (res.rejected) {
-          setPhase({ kind: 'rejected', rejected: res.rejected })
-        } else if (res.needs_location) {
-          setPhase({ kind: 'needs_location', hints: res.needs_location.hints ?? [] })
-        } else {
-          resetDraft()
-          resultSeen.current = openRef.current
-          setPhase({ kind: 'result', res })
-        }
-      } catch (e) {
-        stopStepTimer()
-        if (e instanceof ApiError && e.code === 'needs_location') {
-          attempt.current = null // nothing was stored: the next try gets a fresh client_id
-          setPhase({ kind: 'needs_location', hints: hintsFromBody(e.body) })
-          return
-        }
-        const kind = classifyError(e)
-        // OFFLINE_QUEUE_HOOK: Phase 2 — when kind is 'offline' | 'network', enqueue
-        // { client_id: attempt.current.clientId, request fields, audio blob, photo blobs } to IndexedDB
-        // (src/lib/offlineQueue.ts) and replay on reconnect / Background Sync instead of only offering retry.
-        setPhase({ kind: 'error', error: kind, detail: e instanceof Error ? e.message : undefined })
       }
+      let loc: Pick<ProcessReportRequest, 'lat' | 'lng' | 'accuracy_m' | 'location_source'> = {}
+      if (chosen) {
+        loc = {
+          lat: chosen.lat, lng: chosen.lng, location_source: chosen.source,
+          ...(chosen.accuracy ? { accuracy_m: Math.round(chosen.accuracy) } : {}),
+        }
+      } else if (fix) {
+        loc = { lat: fix.lat, lng: fix.lng, accuracy_m: Math.round(fix.accuracy), location_source: 'gps' }
+      }
+
+      // --- idempotency key: same draft => same client_id
+      const version = draftVersion.current
+      const clientId = attempt.current?.version === version ? attempt.current.clientId : newClientId()
+      attempt.current = { clientId, version }
+
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new MediaUploadError('network', 'offline')
+
+      const [image_paths, direct_path] = await Promise.all([
+        photoPaths(true),
+        d?.kind === 'voice' ? voicePath(d) : Promise.resolve(undefined),
+      ])
+
+      setPhase((p) => (p.kind === 'submitting' ? { ...p, active: 1 } : p))
+      runStepTimer(steps, 1)
+
+      const conversation = history.current
+      const userTexts = conversation.filter((c) => c.role === 'user').map((c) => c.text.trim()).filter(Boolean)
+      if (d?.kind === 'text') userTexts.push(d.text)
+      const attrs = attrsRef.current
+      const allAudio = [...audioPaths.current, ...(direct_path ? [direct_path] : [])]
+      const category = asCategory(draftRef.current?.category)
+      const landmark = attrs.landmark?.value_en?.trim()
+      const req: SubmitRequest = {
+        client_id: clientId,
+        ui_language: lang,
+        language: 'auto',
+        // the user's own words (transcripts + typed); the server builds its input from `conversation` when present
+        text: userTexts.join('\n') || undefined,
+        audio_path: conversation.length === 0 ? direct_path : undefined,
+        audio_paths: allAudio.length ? allAudio : undefined,
+        conversation: conversation.length ? conversation : undefined,
+        attributes: Object.keys(attrs).length ? attrs : undefined,
+        user_urgency: urgencyRef.current ?? undefined,
+        intake_session_id: sessionRef.current,
+        image_paths: image_paths.length ? image_paths : undefined,
+        category_hint: category && category !== 'other' ? category : undefined,
+        ...loc,
+        address_text: chosen?.label || (loc.lat === undefined ? landmark : undefined) || undefined,
+      }
+      const res = await api.processReport(req)
+      stopStepTimer()
+      setPhase((p) => (p.kind === 'submitting' ? { ...p, active: p.steps.length } : p))
+      await sleep(450) // let the last tick land
+
+      attempt.current = null
+      if (res.rejected) {
+        if (res.rejected.reason === 'no_speech' && direct.current?.input.kind === 'voice') {
+          updateMsg(direct.current.id, { status: 'unheard' })
+          direct.current = null
+        }
+        setPhase({ kind: 'rejected', rejected: res.rejected })
+        void playPrompt(res.rejected.reason === 'no_speech' ? 'noSpeech' : 'notIssue', lang)
+      } else if (res.needs_location) {
+        setPhase({ kind: 'needs_location', hints: res.needs_location.hints ?? [] })
+        void playPrompt('needLocation', lang)
+      } else {
+        const snapshot = attrsRef.current
+        newSession()
+        resultSeen.current = openRef.current
+        setPhase({ kind: 'result', res, attributes: snapshot })
+        void playPrompt('reportDone', lang)
+      }
+    } catch (e) {
+      stopStepTimer()
+      if (e instanceof ApiError && e.code === 'needs_location') {
+        attempt.current = null // nothing was stored: the next try gets a fresh client_id
+        setPhase({ kind: 'needs_location', hints: hintsFromBody(e.body) })
+        void playPrompt('needLocation', lang)
+        return
+      }
+      const kind = classifyError(e)
+      // OFFLINE_QUEUE_HOOK: Phase 2 — when kind is 'offline' | 'network', enqueue
+      // { client_id: attempt.current.clientId, SubmitRequest fields, voice-turn blobs not yet uploaded, photo blobs }
+      // to IndexedDB (src/lib/offlineQueue.ts) and replay on reconnect / Background Sync instead of only offering retry.
+      setPhase({ kind: 'error', error: kind, detail: e instanceof Error ? e.message : undefined })
+      void playPrompt('tryAgain', lang)
     } finally {
       busy.current = false
     }
   }
+  const onSend = useStable(() => { void submit() })
 
-  const backToCompose = (focusAddress = false) => {
-    setPhase({ kind: 'compose' })
-    if (focusAddress) {
-      setAddressOpen(true)
-      setTimeout(() => addressRef.current?.focus(), 50)
+  // ---------------------------------------------------------------- location
+  const openLocation = useStable(() => {
+    if (recStateRef.current === 'recording') return
+    stopVoice()
+    setPhase({ kind: 'location' })
+  })
+
+  const choosePoint = (p: PickedLoc) => {
+    pickedRef.current = p
+    setPicked(p)
+    draftVersion.current++
+  }
+
+  const locationInitial = (): PickedLoc => {
+    if (pickedRef.current) return pickedRef.current
+    const g = geoRef.current
+    if (g.state === 'ok' && g.fix) return { lat: g.fix.lat, lng: g.fix.lng, source: 'gps', accuracy: g.fix.accuracy }
+    return { lat: mapCenter.lat, lng: mapCenter.lng, source: 'map' }
+  }
+
+  const relocate = useCallback(() => {
+    const pr = locate()
+    locatePromise.current = pr
+    return pr
+  }, [locate])
+
+  // ---------------------------------------------------------------- open / close / mode
+  const applyMode = (m: 'voice' | 'photo' | 'text') => {
+    if (m === 'text') { setTextOpen(true); return }
+    setTextOpen(false)
+    if (m === 'photo' && photosRef.current.length === 0) {
+      setPhotoWanted(true)
+      // best effort: browsers may require a fresh tap, in which case the big camera tile is right there
+      try { cameraInput.current?.click() } catch { /* blocked without user activation */ }
     }
   }
+  const applyModeStable = useStable(applyMode)
+  const onCloseCleanup = useStable(() => {
+    resetRecorder()
+    stopVoice()
+    if (countdownRef.current) cancelCountdown()
+    if (submitAfterTurn.current && !thinkingRef.current) { submitAfterTurn.current = false; setSendQueued(false) }
+    setHint(null)
+  })
+  const onOpenInit = useStable(() => {
+    if (phaseRef.current.kind === 'result') {
+      if (resultSeen.current) setPhase({ kind: 'chat' }) // the session was already reset when it succeeded
+      else resultSeen.current = true // finished while the sheet was closed: show it now
+    }
+    if (phaseRef.current.kind === 'location') setPhase({ kind: 'chat' })
+    if (!pickedRef.current) void relocate()
+    if (recStateRef.current === 'unsupported') setHint({ prompt: 'micDenied', tone: 'info' })
+  })
+
+  const lastMode = useRef(mode)
+  useEffect(() => {
+    openRef.current = open
+    if (open && !wasOpen.current) {
+      onOpenInit()
+      applyModeStable(mode)
+      lastMode.current = mode
+    }
+    if (!open && wasOpen.current) onCloseCleanup()
+    wasOpen.current = open
+  }, [open, mode, onOpenInit, applyModeStable, onCloseCleanup])
+
+  // the map may switch the mode while the sheet is already open
+  useEffect(() => {
+    if (open && lastMode.current !== mode) applyModeStable(mode)
+    lastMode.current = mode
+  }, [open, mode, applyModeStable])
+
+  // microphone refused / broken: say so and offer photo + text
+  useEffect(() => {
+    if (!openRef.current) return
+    if (rec.state === 'denied') { setTextOpen(false); notice('micDenied') }
+    else if (rec.state === 'error') notice('tryAgain')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rec.state])
+
+  // transient hints fade out (the mic-denied one stays while it is true)
+  useEffect(() => {
+    if (!hint || hint.prompt === 'micDenied') return
+    const id = setTimeout(() => setHint(null), HINT_MS)
+    return () => clearTimeout(id)
+  }, [hint])
+
+  useEffect(() => () => stopStepTimer(), [])
+
+  // ---------------------------------------------------------------- render
+  const canSend = phase.kind === 'chat' && (
+    msgs.some((m) => m.role === 'user' && m.kind !== 'photo' && m.status === 'done') || photos.photos.length > 0
+  )
+  const firstTurn = !msgs.some((m) => m.role === 'ai' && m.kind === 'reply')
+  const geoFix = geo.state === 'ok' ? geo.fix : null
+  const locKind: LocKind = picked ? 'picked' : geo.state === 'locating' ? 'locating' : geoFix ? 'gps' : 'none'
+  const userLoc = useMemo(() => (geoFix ? { lat: geoFix.lat, lng: geoFix.lng } : null), [geoFix])
+  const roomForPhotos = photos.photos.length < photos.max
+  const showPhotoCard = phase.kind === 'chat' && photoWanted && firstTurn && roomForPhotos
+  const showPhotoAsk = phase.kind === 'chat' && askPhoto && !firstTurn && roomForPhotos
+
+  const lastAiExtra = useMemo(
+    () => (showPhotoAsk ? <PhotoAsk onCamera={openCamera} onGallery={openGallery} /> : null),
+    [showPhotoAsk, openCamera, openGallery],
+  )
+  const afterGreeting = useMemo(
+    () => (firstTurn ? <UrgencyPicker value={userUrgency} onPick={onPickUrgency} /> : null),
+    [firstTurn, userUrgency, onPickUrgency],
+  )
+  const footer = useMemo(() => {
+    if (!showPhotoCard && photos.busy === 0 && !photos.error) return null
+    return (
+      <div className="flex flex-col gap-2">
+        {showPhotoCard && <PhotoCard onCamera={openCamera} onGallery={openGallery} autoPlay={photoWanted} />}
+        {photos.busy > 0 && (
+          <div className="flex items-center gap-2 self-end rounded-full bg-slate-100 px-3 py-2 text-sm text-slate-600">
+            <Loader2 className="size-4 animate-spin" /> {t('report.preparingPhoto')}
+          </div>
+        )}
+        {photos.error && (
+          <p role="alert" className="self-end rounded-2xl bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+            {photos.error === 'too_large' ? t('report.photoTooLarge') : t('report.photoDecodeError')}
+          </p>
+        )}
+      </div>
+    )
+  }, [showPhotoCard, photos.busy, photos.error, photoWanted, openCamera, openGallery, t])
+
+  const guidePrompt: VoicePromptId | null = phase.kind === 'chat'
+    ? (micBlocked ? 'micDenied' : 'reportVoice')
+    : phase.kind === 'result' ? 'reportDone'
+      : phase.kind === 'rejected' ? (phase.rejected.reason === 'no_speech' ? 'noSpeech' : 'notIssue')
+        : phase.kind === 'error' ? 'tryAgain' : null
 
   const title = (
     <span className="flex items-center gap-2">
-      <Megaphone className="size-6 text-brand-700" /> {t('report.title')}
+      <Megaphone className="size-6 shrink-0 text-brand-700" />
+      <span className="min-w-0 flex-1 truncate">{t('report.title')}</span>
+      {guidePrompt && (
+        <VoiceGuide prompt={guidePrompt} autoPlay={guidePrompt === 'reportVoice' && mode !== 'photo'} label={false} size={40} />
+      )}
     </span>
   )
 
+  const wrap = (node: ReactNode) => <div className="awaaz-chat-scroll -mx-4 min-h-0 flex-1 overflow-y-auto px-4 pb-2">{node}</div>
+
   return (
-    <Sheet open={open} onClose={onClose} title={title}>
-      {phase.kind === 'compose' && (
-        <div className="flex flex-col gap-4">
-          <LocationChip
-            state={geo.state}
-            fix={geo.fix}
-            typed={address.trim().length > 0}
-            addressOpen={addressOpen}
-            onRetry={() => { locatePromise.current = locate() }}
-            onToggleAddress={() => {
-              setAddressOpen((v) => !v)
-              if (!addressOpen) setTimeout(() => addressRef.current?.focus(), 50)
-            }}
+    <Sheet open={open} onClose={onClose} title={title} className="flex h-[92dvh] flex-col overflow-hidden! md:h-auto">
+      <input ref={cameraInput} type="file" accept="image/*" capture="environment" className="hidden"
+        onChange={(e) => { void onPhotoFiles(e.currentTarget) }} />
+      <input ref={galleryInput} type="file" accept="image/*" multiple className="hidden"
+        onChange={(e) => { void onPhotoFiles(e.currentTarget) }} />
+
+      {phase.kind === 'chat' && (
+        <>
+          <div className="flex shrink-0 flex-col gap-2 pb-2">
+            <LocationChip kind={locKind} accuracy={geoFix?.accuracy} label={picked?.label} onOpen={openLocation} />
+            <KnowCard draft={draft} attributes={attributes} version={knowVersion} />
+          </div>
+          <ChatThread
+            msgs={msgs}
+            thinking={thinking}
+            photos={photos.photos}
+            onRemovePhoto={onRemovePhoto}
+            onRetry={onRetry}
+            afterGreeting={afterGreeting}
+            lastAiExtra={lastAiExtra}
+            footer={footer}
           />
-          {addressOpen && (
-            <div className="relative">
-              <MapPinned className="pointer-events-none absolute start-3.5 top-1/2 size-5 -translate-y-1/2 text-slate-400" />
-              <input
-                ref={addressRef}
-                type="text"
-                dir="auto"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder={t('report.addressPlaceholder')}
-                aria-label={t('report.addressLabel')}
-                maxLength={200}
-                enterKeyHint="done"
-                autoComplete="street-address"
-                className="min-h-12 w-full rounded-2xl border-2 border-slate-200 bg-white pe-4 ps-11 text-base outline-none focus:border-brand-600"
-              />
-            </div>
+          {countdown ? (
+            <EmergencyCountdown onElapsed={onCountdownDone} onCancel={cancelCountdown} />
+          ) : (
+            <Composer
+              rec={rec}
+              micBlocked={micBlocked}
+              thinking={thinking}
+              quick={quick}
+              onChip={onChip}
+              onMic={onMic}
+              onCancelRec={onCancelRec}
+              onCamera={openCamera}
+              photoCount={photos.photos.length}
+              askPhoto={askPhoto}
+              textOpen={textOpen}
+              onTextOpen={setTextOpen}
+              text={text}
+              onText={setText}
+              onSendText={onSendText}
+              canSend={canSend}
+              ready={ready}
+              emergency={userUrgency === 'emergency'}
+              sendQueued={sendQueued}
+              onSend={onSend}
+              hint={hint}
+              onDismissHint={() => setHint(null)}
+            />
           )}
-
-          <div className="grid grid-cols-3 gap-2" role="group" aria-label={t('report.title')}>
-            <InputTile icon={Mic} label={t('report.tileVoice')} active={panel === 'voice'} onClick={() => choosePanel('voice')}
-              badge={rec.state === 'recording' ? 'rec' : rec.blob ? 'check' : null} addedLabel={t('report.added')} />
-            <InputTile icon={Camera} label={t('report.tilePhoto')} active={panel === 'photo'} onClick={() => choosePanel('photo')}
-              badge={photos.photos.length > 0 ? photos.photos.length : null} addedLabel={t('report.added')} />
-            <InputTile icon={Keyboard} label={t('report.tileText')} active={panel === 'text'} onClick={() => choosePanel('text')}
-              badge={hasText ? 'check' : null} addedLabel={t('report.added')} />
-          </div>
-
-          <div className="min-h-44">
-            {panel === 'voice' && <VoicePanel rec={rec} />}
-            {panel === 'photo' && <PhotoPanel draft={photos} autoOpen={autoCamera} onAutoOpened={onAutoOpened} />}
-            {panel === 'text' && (
-              <label className="block">
-                <span className="sr-only">{t('report.textLabel')}</span>
-                <textarea
-                  ref={textRef}
-                  dir="auto"
-                  value={text}
-                  onChange={(e) => { setText(e.target.value); setNeedInput(false) }}
-                  placeholder={t('report.textPlaceholder')}
-                  rows={5}
-                  maxLength={1000}
-                  className="w-full resize-none rounded-2xl border-2 border-slate-200 bg-white p-3 text-lg outline-none focus:border-brand-600"
-                />
-              </label>
-            )}
-          </div>
-
-          <CategoryHints value={categoryHint} onChange={setCategoryHint} />
-
-          <div className="sticky bottom-0 -mx-4 flex flex-col gap-1.5 bg-white px-4 pt-2 shadow-[0_-8px_12px_-8px_rgba(15,23,42,0.12)]">
-            {(needInput || !hasInput) && (
-              <p className={clsx('text-center text-sm', needInput ? 'font-semibold text-amber-700' : 'text-slate-500')}>{t('report.needInput')}</p>
-            )}
-            <button
-              type="button"
-              onClick={() => { void submit() }}
-              disabled={!hasInput || photos.busy > 0}
-              className="inline-flex min-h-16 items-center justify-center gap-3 rounded-2xl bg-brand-700 px-6 text-xl font-bold text-white shadow-lg transition active:scale-[0.98] disabled:bg-slate-300 disabled:shadow-none"
-            >
-              <Send className="size-7 rtl:-scale-x-100" />
-              {t('report.send')}
-              <span className="flex items-center gap-1 opacity-80" aria-hidden>
-                {(rec.blob || rec.state === 'recording') && <Mic className="size-5" />}
-                {photos.photos.length > 0 && <Camera className="size-5" />}
-                {hasText && <Keyboard className="size-5" />}
-              </span>
-            </button>
-          </div>
-        </div>
+        </>
       )}
 
-      {phase.kind === 'submitting' && <ProgressSteps steps={phase.steps} active={phase.active} />}
-
-      {phase.kind === 'result' && (
-        <ResultCard
-          res={phase.res}
-          onSeeMap={() => { resultSeen.current = true; onDone(phase.res) }}
-          onNew={() => { resetDraft(); setPanel(mode); setPhase({ kind: 'compose' }) }}
+      {phase.kind === 'location' && (
+        <LocationStep
+          initial={locationInitial()}
+          userLocation={userLoc}
+          onLocate={relocate}
+          onBack={() => setPhase({ kind: 'chat' })}
+          onUse={(p) => { choosePoint(p); setPhase({ kind: 'chat' }) }}
         />
       )}
 
-      {phase.kind === 'rejected' && (
+      {phase.kind === 'needs_location' && (
+        <LocationStep
+          problem
+          initial={locationInitial()}
+          userLocation={userLoc}
+          hints={phase.hints}
+          onLocate={relocate}
+          onBack={() => setPhase({ kind: 'chat' })}
+          onUse={(p) => { choosePoint(p); setPhase({ kind: 'chat' }); void submit({ loc: p }) }}
+        />
+      )}
+
+      {phase.kind === 'submitting' && wrap(<ProgressSteps steps={phase.steps} active={phase.active} />)}
+
+      {phase.kind === 'result' && wrap(
+        <ResultCard
+          res={phase.res}
+          attributes={phase.attributes}
+          onSeeMap={() => { resultSeen.current = true; onDone(phase.res) }}
+          onNew={() => { newSession(); setPhase({ kind: 'chat' }); applyMode(mode) }}
+        />,
+      )}
+
+      {phase.kind === 'rejected' && wrap(
         <StatusScreen icon={ShieldAlert} tone="amber" title={t('report.rejectedTitle')}
           body={pick(phase.rejected.message_en, phase.rejected.message_ur)}>
-          <PrimaryButton icon={PencilLine} onClick={() => backToCompose()}>{t('report.editRetry')}</PrimaryButton>
+          <PrimaryButton icon={PencilLine} onClick={() => setPhase({ kind: 'chat' })}>{t('report.editRetry')}</PrimaryButton>
           <SecondaryButton onClick={onClose}>{t('common.close')}</SecondaryButton>
-        </StatusScreen>
+        </StatusScreen>,
       )}
 
-      {phase.kind === 'needs_location' && (
-        <StatusScreen icon={MapPinOff} tone="amber" title={t('report.needsLocTitle')} body={t('report.needsLocBody')}>
-          {phase.hints.length > 0 && (
-            <div className="flex flex-wrap items-center justify-center gap-1.5 text-sm">
-              <span className="text-slate-500">{t('report.weUnderstood')}</span>
-              {phase.hints.map((h) => (
-                <span key={h} dir="auto" className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">{h}</span>
-              ))}
-            </div>
-          )}
-          <PrimaryButton icon={MapPin} onClick={() => { void submit({ forceMap: true }) }}>{t('report.useMapCentre')}</PrimaryButton>
-          <SecondaryButton icon={PencilLine} onClick={() => backToCompose(true)}>{t('report.typeAddress')}</SecondaryButton>
-        </StatusScreen>
-      )}
-
-      {phase.kind === 'error' && (
-        <ErrorScreen kind={phase.error} detail={phase.detail} onRetry={() => { void submit() }} onEdit={() => backToCompose()} />
+      {phase.kind === 'error' && wrap(
+        <ErrorScreen kind={phase.error} detail={phase.detail} onRetry={() => { void submit() }} onEdit={() => setPhase({ kind: 'chat' })} />,
       )}
     </Sheet>
   )
 }
 
-function InputTile({ icon: Icon, label, active, onClick, badge, addedLabel }: {
-  icon: LucideIcon; label: string; active: boolean; onClick: () => void
-  badge: 'check' | 'rec' | number | null; addedLabel: string
-}) {
+function PhotoCard({ onCamera, onGallery, autoPlay }: { onCamera: () => void; onGallery: () => void; autoPlay: boolean }) {
+  const { t } = useI18n()
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={badge ? `${label} — ${addedLabel}` : label}
-      className={clsx(
-        'relative flex min-h-20 flex-col items-center justify-center gap-1 rounded-2xl border-2 font-bold transition active:scale-95',
-        active ? 'border-brand-700 bg-brand-700 text-white shadow-md' : 'border-slate-200 bg-white text-ink',
-      )}
-    >
-      <Icon className="size-8" />
-      <span className="text-sm leading-tight">{label}</span>
-      {badge === 'rec' && <span className="absolute end-2 top-2 size-3 animate-pulse rounded-full bg-red-500 ring-2 ring-white" />}
-      {badge === 'check' && (
-        <span className="absolute end-1.5 top-1.5 inline-flex size-6 items-center justify-center rounded-full bg-green-600 text-white ring-2 ring-white">
-          <Check className="size-4" strokeWidth={3} />
-        </span>
-      )}
-      {typeof badge === 'number' && (
-        <span className="font-latin absolute end-1.5 top-1.5 inline-flex size-6 items-center justify-center rounded-full bg-green-600 text-xs text-white ring-2 ring-white">
-          {badge}
-        </span>
-      )}
-    </button>
+    <div className="awaaz-bubble-in ms-11 flex flex-col gap-2.5 rounded-3xl bg-white p-3 shadow-sm ring-1 ring-brand-100">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 text-sm font-semibold text-slate-700">{t('report.photoCardBody')}</span>
+        <VoiceGuide prompt="reportPhoto" autoPlay={autoPlay} label={false} size={40} />
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onCamera}
+          className="relative inline-flex min-h-16 flex-1 items-center justify-center gap-3 rounded-2xl bg-brand-700 px-4 text-lg font-bold text-white shadow-md active:scale-[0.98]"
+        >
+          <span aria-hidden className="awaaz-attn absolute inset-0 rounded-2xl ring-4 ring-brand-500/40" />
+          <Camera className="relative size-8" /> <span className="relative">{t('report.takePhoto')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={onGallery}
+          aria-label={t('report.fromGallery')}
+          className="inline-flex min-h-16 w-20 flex-col items-center justify-center gap-0.5 rounded-2xl bg-slate-50 text-xs font-semibold text-ink ring-1 ring-slate-200 active:scale-[0.98]"
+        >
+          <Images className="size-7" /> {t('report.fromGallery')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** Inline "take a photo" row inside the AI bubble that asked for one. */
+function PhotoAsk({ onCamera, onGallery }: { onCamera: () => void; onGallery: () => void }) {
+  const { t } = useI18n()
+  return (
+    <div className="mt-3 flex items-center gap-2 border-t border-brand-100 pt-3">
+      <button
+        type="button"
+        onClick={onCamera}
+        className="relative inline-flex min-h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-700 px-3 text-base font-bold text-white shadow-md active:scale-[0.98]"
+      >
+        <span aria-hidden className="awaaz-attn absolute inset-0 rounded-2xl ring-4 ring-brand-500/40" />
+        <Camera className="relative size-6" /> <span className="relative">{t('report.takePhoto')}</span>
+      </button>
+      <button
+        type="button"
+        onClick={onGallery}
+        aria-label={t('report.fromGallery')}
+        title={t('report.fromGallery')}
+        className="inline-flex size-14 shrink-0 items-center justify-center rounded-2xl bg-white text-ink ring-1 ring-slate-200 active:scale-95"
+      >
+        <Images className="size-6" />
+      </button>
+      <VoiceGuide prompt="reportPhoto" label={false} size={40} />
+    </div>
   )
 }
 

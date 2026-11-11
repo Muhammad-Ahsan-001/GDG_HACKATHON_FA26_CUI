@@ -1,4 +1,5 @@
-// Shared frontend types. Mirrors docs/CONTRACT.md. Extend, don't break.
+// Shared frontend types. Mirrors docs/CONTRACT.md (+ CONTRACT-1B.md). Extend, don't break.
+import type { AttributeMap, ChatTurn, UserUrgency } from './attributes'
 
 export type Role = 'citizen' | 'ngo' | 'responder' | 'admin'
 export type OrgType = 'shelter' | 'food_bank' | 'health_ngo' | 'rescue_1122' | 'fire' | 'police' | 'water'
@@ -22,6 +23,10 @@ export interface Profile {
   language: Lang
   trust_score: number
   is_demo: boolean
+  /** Phase 1b: normalised home area from the voice profile, e.g. "G-9/4, Islamabad" */
+  home_area: string | null
+  /** Phase 1b: set by the complete_onboarding RPC; null = citizen has not finished onboarding */
+  onboarded_at: string | null
   created_at: string
 }
 
@@ -51,6 +56,9 @@ export interface MapPin {
   created_at: string
   updated_at: string
   last_report_at: string
+  /** Phase 1b: merged intake attributes of the cluster's reports */
+  attributes: AttributeMap | null
+  user_urgency: UserUrgency | null
 }
 
 /** Row of the `public_reports` view. */
@@ -70,6 +78,9 @@ export interface PublicReport {
   photo_url: string | null
   created_at: string
   is_mine: boolean
+  /** Phase 1b */
+  attributes: AttributeMap | null
+  user_urgency: UserUrgency | null
 }
 
 /** Own report row (RLS: reporter only). */
@@ -124,6 +135,12 @@ export interface MyAssignment {
   food_servings: number | null
   food_type: string | null
   safe_until: string | null
+  /** Phase 1b */
+  attributes: AttributeMap | null
+  user_urgency: UserUrgency | null
+  /** SOS (women's safety): private cluster, never on the public map */
+  is_private: boolean
+  sos_session_id: string | null
 }
 
 export interface AppNotification {
@@ -131,7 +148,7 @@ export interface AppNotification {
   user_id: string
   report_id: string | null
   cluster_id: string | null
-  type: 'new_assignment' | 'status_change' | 'nearby_alert' | 'food_alert' | 'verified' | string
+  type: 'new_assignment' | 'status_change' | 'nearby_alert' | 'food_alert' | 'verified' | 'sos_alert' | 'sos_logged' | string
   title_en: string | null
   title_ur: string | null
   body_en: string | null
@@ -155,6 +172,13 @@ export interface ProcessReportRequest {
   language?: 'ur' | 'en' | 'pa' | 'auto'
   ui_language: Lang
   category_hint?: Category
+  // ---- Phase 1b (AI intake conversation) ----
+  conversation?: ChatTurn[]
+  attributes?: AttributeMap
+  user_urgency?: UserUrgency
+  intake_session_id?: string
+  /** every voice turn of the conversation (report-audio bucket), stored as report_media */
+  audio_paths?: string[]
 }
 
 export interface ProcessReportResponse {

@@ -12,6 +12,11 @@ interface AuthCtx {
   loading: boolean
   isAnonymous: boolean
   role: Role | null
+  /**
+   * True when the signed-in user needs no citizen onboarding: organisations / admins, demo accounts,
+   * and citizens whose profile.onboarded_at is set (complete_onboarding RPC). False while signed out.
+   */
+  isOnboarded: boolean
   refreshProfile: () => Promise<void>
   signInAnonymously: () => Promise<void>
   signInWithPassword: (email: string, password: string) => Promise<void>
@@ -63,7 +68,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading,
     isAnonymous: Boolean(session?.user?.is_anonymous),
     role: profile?.role ?? null,
-    refreshProfile: () => loadProfile(session?.user.id),
+    isOnboarded: isProfileOnboarded(profile),
+    // read the live session (not this render's): callers may refresh right after signing in
+    async refreshProfile() {
+      const { data } = await supabase.auth.getSession()
+      await loadProfile(data.session?.user.id ?? session?.user.id)
+    },
     async signInAnonymously() {
       const { error } = await supabase.auth.signInAnonymously({ options: { data: { role: 'citizen' } } })
       if (error) throw error
@@ -92,6 +102,12 @@ export function useAuth(): AuthCtx {
   const v = useContext(Ctx)
   if (!v) throw new Error('useAuth must be used inside <AuthProvider>')
   return v
+}
+
+/** See AuthCtx.isOnboarded. `select('*')` already returns home_area / onboarded_at once the 1b migration is live. */
+export function isProfileOnboarded(profile: Profile | null | undefined): boolean {
+  if (!profile) return false
+  return profile.role !== 'citizen' || Boolean(profile.onboarded_at) || profile.is_demo
 }
 
 /** Where a user should land after login, by role. */

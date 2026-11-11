@@ -1,12 +1,22 @@
 import clsx from 'clsx'
-import { Bell, CheckCheck, Inbox, LayoutGrid, Wrench, type LucideIcon } from 'lucide-react'
+import { Bell, CheckCheck, Inbox, LayoutGrid, Siren, Wrench, type LucideIcon } from 'lucide-react'
 import { CATEGORY_META } from '../../lib/categories'
 import { useI18n } from '../../lib/i18n'
 import { ASSIGNMENT_META } from '../../lib/status'
 import type { Category } from '../../lib/types'
 import { EmptyState, Spinner } from '../ui'
 import { AssignmentCard } from './AssignmentCard'
+import { SOS_RED, SosCard } from './SosCard'
 import type { AssignmentActionKind, CategoryFilter, DashAssignment, DashTab } from './types'
+import { isSos, type SosLive } from './useSosLive'
+
+/** What SOS cards need from the page (live sessions, follow-on-map, alarm acknowledgement). */
+export interface SosListContext {
+  live: ReadonlyMap<string, SosLive>
+  followId: string | null
+  onFollow: (a: DashAssignment) => void
+  onAck: (a: DashAssignment) => void
+}
 
 const TABS: { tab: DashTab; key: string; icon: LucideIcon; color: string }[] = [
   { tab: 'new', key: 'dashboard.tabNew', icon: Bell, color: ASSIGNMENT_META.alerted.color },
@@ -40,6 +50,9 @@ export interface ListPanelProps {
   showOrg: boolean
   onSelect: (a: DashAssignment) => void
   onAction: (a: DashAssignment, action: AssignmentActionKind) => void
+  /** active SOS alerts: pinned above the list whatever tab / category is chosen */
+  pinned: DashAssignment[]
+  sos: SosListContext
 }
 
 export function ListPanel(p: ListPanelProps) {
@@ -113,6 +126,17 @@ export function ListPanel(p: ListPanelProps) {
 
       {/* Cards */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50 p-3">
+        {p.pinned.length > 0 && (
+          <section aria-label={t('dashboard.sosPinned', { n: p.pinned.length })} className="mb-4 space-y-3">
+            <h3 className="flex items-center gap-1.5 text-sm font-black tracking-wide uppercase" style={{ color: SOS_RED }}>
+              <Siren className="size-5" />
+              {t('dashboard.sosPinned', { n: p.pinned.length })}
+            </h3>
+            <ul className="space-y-3">
+              {p.pinned.map((a) => <li key={a.assignment_id}>{renderCard(p, a)}</li>)}
+            </ul>
+          </section>
+        )}
         {p.loading ? (
           <div className="flex justify-center p-10 text-brand-700"><Spinner className="size-9" /></div>
         ) : p.error ? (
@@ -123,28 +147,42 @@ export function ListPanel(p: ListPanelProps) {
             </button>
           </EmptyState>
         ) : p.items.length === 0 ? (
-          <EmptyState icon={TABS.find((x) => x.tab === p.tab)?.icon ?? Inbox} title={t(EMPTY[p.tab].title)}>
-            <p className="text-sm">{t(EMPTY[p.tab].body)}</p>
-          </EmptyState>
+          // with SOS cards pinned above, a big "nothing here" would read as "no alerts at all"
+          p.pinned.length ? null : (
+            <EmptyState icon={TABS.find((x) => x.tab === p.tab)?.icon ?? Inbox} title={t(EMPTY[p.tab].title)}>
+              <p className="text-sm">{t(EMPTY[p.tab].body)}</p>
+            </EmptyState>
+          )
         ) : (
           <ul className="space-y-3">
-            {p.items.map((a) => (
-              <li key={a.assignment_id}>
-                <AssignmentCard
-                  a={a}
-                  selected={p.selectedId === a.assignment_id}
-                  highlighted={p.highlightIds.has(a.assignment_id)}
-                  pending={p.pending.has(a.assignment_id)}
-                  showOrg={p.showOrg}
-                  onSelect={p.onSelect}
-                  onAction={p.onAction}
-                />
-              </li>
-            ))}
+            {p.items.map((a) => <li key={a.assignment_id}>{renderCard(p, a)}</li>)}
           </ul>
         )}
       </div>
     </div>
+  )
+}
+
+/** SOS alerts get the red SOS card (live location, evidence); everything else the normal card. */
+function renderCard(p: ListPanelProps, a: DashAssignment) {
+  const common = {
+    a,
+    selected: p.selectedId === a.assignment_id,
+    highlighted: p.highlightIds.has(a.assignment_id),
+    pending: p.pending.has(a.assignment_id),
+    showOrg: p.showOrg,
+    onSelect: p.onSelect,
+    onAction: p.onAction,
+  }
+  if (!isSos(a)) return <AssignmentCard {...common} />
+  return (
+    <SosCard
+      {...common}
+      live={a.sos_session_id ? p.sos.live.get(a.sos_session_id) : undefined}
+      following={p.sos.followId === a.assignment_id}
+      onFollow={p.sos.onFollow}
+      onAck={p.sos.onAck}
+    />
   )
 }
 

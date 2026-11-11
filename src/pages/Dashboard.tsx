@@ -6,13 +6,15 @@ import { AlertToasts, type ToastItem } from '../components/dashboard/AlertToast'
 import { AssignmentCard } from '../components/dashboard/AssignmentCard'
 import { DashboardMap, type ServiceArea } from '../components/dashboard/DashboardMap'
 import { EnableAlertsButton } from '../components/dashboard/EnableAlertsButton'
-import { ListPanel } from '../components/dashboard/ListPanel'
+import { ListPanel, type SosListContext } from '../components/dashboard/ListPanel'
 import { NoOrgCta, PendingApproval } from '../components/dashboard/OrgGate'
 import { OrgTypeIcon, useOrgTypeLabel } from '../components/dashboard/orgTypes'
+import { SosCard } from '../components/dashboard/SosCard'
 import { StatsRow } from '../components/dashboard/StatsRow'
 import { tabOf, type AssignmentActionKind, type CategoryFilter, type DashAssignment, type DashOrg, type DashTab, type MapFocus } from '../components/dashboard/types'
 import { useAssignments, type LiveState } from '../components/dashboard/useAssignments'
-import { beep, unlockAudio, vibrate } from '../components/dashboard/alerts'
+import { isSos, useSosLive } from '../components/dashboard/useSosLive'
+import { beep, siren, unlockAudio, vibrate, vibrateSos } from '../components/dashboard/alerts'
 import { formatKm, readLocal, sortForTab, useMediaQuery, writeLocal } from '../components/dashboard/utils'
 import { AppHeader } from '../components/layout/AppHeader'
 import { Spinner } from '../components/ui'
@@ -23,6 +25,13 @@ import type { Category } from '../lib/types'
 
 const SOUND_KEY = 'awaaz.dashboard.sound'
 const HIGHLIGHT_MS = 45_000
+/** An unclaimed SOS keeps sounding until someone touches it / claims it (max SOS_ALARM_MAX repeats). */
+const SOS_ALARM_EVERY_MS = 12_000
+const SOS_ALARM_MAX = 5
+/** On opening the dashboard, unclaimed SOS alerts younger than this start the alarm too. */
+const SOS_ALARM_ON_LOAD_MS = 30 * 60_000
+
+const ts = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : 0)
 
 let toastSeq = 0
 const toastId = () => `t${Date.now().toString(36)}${(toastSeq++).toString(36)}`
@@ -102,6 +111,8 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [focus, setFocus] = useState<MapFocus | null>(null)
   const [view, setView] = useState<'list' | 'map'>('list')
+  /** SOS alert whose live location the map follows */
+  const [followId, setFollowId] = useState<string | null>(null)
   const [mapWanted, setMapWanted] = useState(false)
   const [highlight, setHighlight] = useState<ReadonlySet<string>>(() => new Set())
   const [toasts, setToasts] = useState<ToastItem[]>([])
@@ -129,7 +140,19 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
     })
   }, [])
 
-  // ---- new alert: highlight + beep + vibrate + toast ----
+  // ---- SOS alarm (repeats while an SOS is unclaimed and untouched) ----
+  const [alarmIds, setAlarmIds] = useState<ReadonlySet<string>>(() => new Set())
+  const alarmCount = useRef(0)
+  const ackSos = useCallback((a: DashAssignment) => {
+    setAlarmIds((prev) => {
+      if (!prev.has(a.assignment_id)) return prev
+      const next = new Set(prev)
+      next.delete(a.assignment_id)
+      return next
+    })
+  }, [])
+
+  // ---- new alert: highlight + beep / SOS siren + vibrate + toast ----
   const onNew = useCallback((fresh: DashAssignment[]) => {
     const ids = fresh.map((f) => f.assignment_id)
     setHighlight((prev) => new Set([...prev, ...ids]))
@@ -140,26 +163,81 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
         return next
       })
     }, HIGHLIGHT_MS)
-    if (soundRef.current) beep()
-    vibrate()
-    const top = sortForTab(fresh, 'new')[0]
-    pushToast({
-      id: toastId(), kind: 'new', assignmentId: top.assignment_id, category: top.category,
-      title_en: top.title_en, title_ur: top.title_ur, more: fresh.length - 1,
-    })
+    const sosFresh = fresh.filter(isSos)
+    const regular = fresh.filter((a) => !isSos(a))
+    if (sosFresh.length) {
+      // loud, distinct, insistent: a person may be in danger right now
+      if (soundRef.current) siren()
+      vibrateSos()
+      alarmCount.current = 0
+      setAlarmIds((prev) => new Set([...prev, ...sosFresh.map((a) => a.assignment_id)]))
+      const top = sosFresh[0]
+      pushToast({
+        id: toastId(), kind: 'new', sos: true, assignmentId: top.assignment_id, category: top.category,
+        title_en: top.title_en, title_ur: top.title_ur, more: sosFresh.length - 1,
+      })
+    }
+    if (regular.length) {
+      if (!sosFresh.length) {
+        if (soundRef.current) beep()
+        vibrate()
+      }
+      const top = sortForTab(regular, 'new')[0]
+      pushToast({
+        id: toastId(), kind: 'new', assignmentId: top.assignment_id, category: top.category,
+        title_en: top.title_en, title_ur: top.title_ur, more: regular.length - 1,
+      })
+    }
   }, [pushToast])
 
   const { items, loading, error, live, version, loadedKey, pending, act, refresh } = useAssignments(orgId, onNew)
 
   // reset the selection when switching organisation
-  useEffect(() => { setSelectedId(null); setCategory('all') }, [orgId])
+  useEffect(() => { setSelectedId(null); setCategory('all'); setFollowId(null) }, [orgId])
+
+  // ---- SOS: active alerts are pinned above every tab, with live location from their sessions ----
+  const pinned = useMemo(() => items
+    .filter((a) => isSos(a) && a.status !== 'resolved')
+    .sort((x, y) => (x.status === 'alerted' ? 0 : 1) - (y.status === 'alerted' ? 0 : 1) || ts(y.alerted_at) - ts(x.alerted_at)),
+  [items])
+  const regularItems = useMemo(() => items.filter((a) => !(isSos(a) && a.status !== 'resolved')), [items])
+  const sosSessionIds = useMemo(
+    () => pinned.map((a) => a.sos_session_id).filter((x): x is string => Boolean(x)),
+    [pinned],
+  )
+  const { live: sosLive } = useSosLive(sosSessionIds)
+
+  // unclaimed recent SOS alerts already waiting when the dashboard opens also start the alarm
+  const seededFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (loading || loadedKey === null || seededFor.current === loadedKey) return
+    seededFor.current = loadedKey
+    const now = Date.now()
+    const waiting = items.filter((a) => isSos(a) && a.status === 'alerted' && now - ts(a.alerted_at) < SOS_ALARM_ON_LOAD_MS)
+    if (waiting.length) setAlarmIds((prev) => new Set([...prev, ...waiting.map((a) => a.assignment_id)]))
+  }, [loading, loadedKey, items])
+
+  const alarmActive = useMemo(
+    () => pinned.some((a) => a.status === 'alerted' && alarmIds.has(a.assignment_id)),
+    [pinned, alarmIds],
+  )
+  useEffect(() => {
+    if (!alarmActive || !sound) return
+    const id = window.setInterval(() => {
+      if (document.visibilityState !== 'visible' || alarmCount.current >= SOS_ALARM_MAX) return
+      alarmCount.current++
+      siren()
+      vibrateSos()
+    }, SOS_ALARM_EVERY_MS)
+    return () => window.clearInterval(id)
+  }, [alarmActive, sound])
 
   // ---- derived lists ----
   const byTab = useMemo(() => {
     const g: Record<DashTab, DashAssignment[]> = { new: [], active: [], done: [] }
-    for (const a of items) g[tabOf(a)].push(a)
+    for (const a of regularItems) g[tabOf(a)].push(a)
     return g
-  }, [items])
+  }, [regularItems])
 
   const matchesCat = useCallback((a: DashAssignment) => category === 'all' || a.category === category, [category])
 
@@ -171,19 +249,26 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
 
   const categoryCounts = useMemo(() => {
     const c: Partial<Record<Category, number>> = {}
-    for (const a of items) c[a.category] = c[a.category] ?? 0
+    for (const a of regularItems) c[a.category] = c[a.category] ?? 0
     for (const a of byTab[tab]) c[a.category] = (c[a.category] ?? 0) + 1
     if (category !== 'all') c[category] = c[category] ?? 0
     return c
-  }, [items, byTab, tab, category])
+  }, [regularItems, byTab, tab, category])
 
   const visible = useMemo(() => sortForTab(byTab[tab].filter(matchesCat), tab), [byTab, tab, matchesCat])
 
   const attention = useMemo(() => {
     const s = new Set<DashTab>()
-    for (const a of items) if (highlight.has(a.assignment_id)) s.add(tabOf(a))
+    for (const a of regularItems) if (highlight.has(a.assignment_id)) s.add(tabOf(a))
     return s
-  }, [items, highlight])
+  }, [regularItems, highlight])
+
+  // the map always shows the active SOS alerts, whatever tab is open
+  const mapItems = useMemo(() => {
+    if (!pinned.length) return visible
+    const shown = new Set(visible.map((a) => a.assignment_id))
+    return [...pinned.filter((a) => !shown.has(a.assignment_id)), ...visible]
+  }, [pinned, visible])
 
   const selected = useMemo(() => items.find((a) => a.assignment_id === selectedId) ?? null, [items, selectedId])
 
@@ -200,44 +285,76 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
     })
   }
 
+  /** where an alert is right now (SOS: the live location of the person) */
+  const pointOf = useCallback((a: DashAssignment): MapFocus => {
+    const live = a.sos_session_id ? sosLive.get(a.sos_session_id) : undefined
+    return live && live.lat != null && live.lng != null ? { lat: live.lat, lng: live.lng } : { lat: a.lat, lng: a.lng }
+  }, [sosLive])
+
   const selectCard = useCallback((a: DashAssignment) => {
     setSelectedId((cur) => (cur === a.assignment_id ? null : a.assignment_id))
-    setFocus({ lat: a.lat, lng: a.lng })
+    setFocus(pointOf(a))
     unhighlight(a.assignment_id)
-  }, [unhighlight])
+    ackSos(a)
+  }, [unhighlight, ackSos, pointOf])
 
   const selectFromMap = useCallback((id: string) => {
     setSelectedId(id)
     unhighlight(id)
+    const a = items.find((x) => x.assignment_id === id)
+    if (a) ackSos(a)
     scrollToCard(id)
-  }, [unhighlight])
+  }, [unhighlight, items, ackSos])
+
+  // ---- SOS follow-on-map ----
+  const followIdRef = useRef(followId)
+  useEffect(() => { followIdRef.current = followId }, [followId])
+  const onFollow = useCallback((a: DashAssignment) => {
+    ackSos(a)
+    if (followIdRef.current === a.assignment_id) { setFollowId(null); return }
+    setFollowId(a.assignment_id)
+    setSelectedId(a.assignment_id)
+    if (!isDesktop) { setView('map'); setMapWanted(true) }
+  }, [ackSos, isDesktop])
+  const cancelFollow = useCallback(() => setFollowId(null), [])
+  const followItem = followId ? items.find((a) => a.assignment_id === followId) ?? null : null
+  const follow = followItem ? pointOf(followItem) : null
+
+  const sosCtx = useMemo<SosListContext>(
+    () => ({ live: sosLive, followId, onFollow, onAck: ackSos }),
+    [sosLive, followId, onFollow, ackSos],
+  )
 
   const openFromToast = useCallback((id: string) => {
     const a = items.find((x) => x.assignment_id === id)
     setCategory('all')
-    setTab(a ? tabOf(a) : 'new')
+    // pinned SOS cards are visible on every tab
+    if (!a || !isSos(a) || a.status === 'resolved') setTab(a ? tabOf(a) : 'new')
     setSelectedId(id)
     unhighlight(id)
-    if (a) setFocus({ lat: a.lat, lng: a.lng })
+    if (a) { setFocus(pointOf(a)); ackSos(a) }
     scrollToCard(id)
-  }, [items, unhighlight])
+  }, [items, unhighlight, pointOf, ackSos])
 
   const onAction = useCallback(async (a: DashAssignment, action: AssignmentActionKind) => {
     const prevTab = tab
     const nextTab: DashTab = action === 'resolve' ? 'done' : 'active'
+    // pinned (active SOS) cards stay where they are until resolved
+    const staysPinned = isSos(a) && action !== 'resolve'
     // follow the card to its new tab so Claim -> Start work -> Mark resolved is one continuous flow
     setSelectedId(a.assignment_id)
-    setTab(nextTab)
+    if (!staysPinned) setTab(nextTab)
     unhighlight(a.assignment_id)
+    ackSos(a)
     scrollToCard(a.assignment_id)
     const res = await act(a, action)
     if (res.ok) {
-      pushToast({ id: toastId(), kind: 'ok', message: t(`dashboard.done_${action}`) })
+      pushToast({ id: toastId(), kind: 'ok', message: t(isSos(a) ? `dashboard.sosDone_${action}` : `dashboard.done_${action}`) })
     } else {
-      setTab(prevTab)
+      if (!staysPinned) setTab(prevTab)
       pushToast({ id: toastId(), kind: 'error', message: t('dashboard.actionFailed') })
     }
-  }, [act, pushToast, t, tab, unhighlight])
+  }, [act, pushToast, t, tab, unhighlight, ackSos])
 
   const onActionVoid = useCallback((a: DashAssignment, action: AssignmentActionKind) => { void onAction(a, action) }, [onAction])
 
@@ -358,6 +475,8 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
             showOrg={showOrgOnCards}
             onSelect={selectCard}
             onAction={onActionVoid}
+            pinned={pinned}
+            sos={sosCtx}
           />
         </section>
 
@@ -365,7 +484,7 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
         <section className={clsx('relative min-h-0 flex-1 lg:block', view === 'map' ? 'block' : 'hidden')}>
           {mapMounted && (
             <DashboardMap
-              items={visible}
+              items={mapItems}
               selectedId={selectedId}
               highlightIds={highlight}
               areas={areas}
@@ -374,6 +493,9 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
               ready={!loading && loadedKey === (orgId ?? 'all')}
               onSelect={selectFromMap}
               onBackgroundClick={() => setSelectedId(null)}
+              sosLive={sosLive}
+              follow={follow}
+              onFollowCancel={cancelFollow}
             />
           )}
           {!isDesktop && view === 'map' && selected && (
@@ -387,14 +509,29 @@ function DashboardBody({ orgs, pendingOrgs, isAdmin }: { orgs: DashOrg[]; pendin
                 >
                   <X className="size-5" />
                 </button>
-                <AssignmentCard
-                  a={selected}
-                  pending={pending.has(selected.assignment_id)}
-                  highlighted={highlight.has(selected.assignment_id)}
-                  showOrg={showOrgOnCards}
-                  onSelect={(a) => setFocus({ lat: a.lat, lng: a.lng })}
-                  onAction={onActionVoid}
-                />
+                {isSos(selected) ? (
+                  <SosCard
+                    a={selected}
+                    live={selected.sos_session_id ? sosLive.get(selected.sos_session_id) : undefined}
+                    pending={pending.has(selected.assignment_id)}
+                    highlighted={highlight.has(selected.assignment_id)}
+                    following={followId === selected.assignment_id}
+                    showOrg={showOrgOnCards}
+                    onSelect={(a) => setFocus(pointOf(a))}
+                    onAction={onActionVoid}
+                    onFollow={onFollow}
+                    onAck={ackSos}
+                  />
+                ) : (
+                  <AssignmentCard
+                    a={selected}
+                    pending={pending.has(selected.assignment_id)}
+                    highlighted={highlight.has(selected.assignment_id)}
+                    showOrg={showOrgOnCards}
+                    onSelect={(a) => setFocus({ lat: a.lat, lng: a.lng })}
+                    onAction={onActionVoid}
+                  />
+                )}
               </div>
             </div>
           )}

@@ -449,3 +449,15 @@ verify_jwt = false
 [functions.digest]
 enabled = true
 verify_jwt = false
+
+[functions.report-chat]
+enabled = true
+verify_jwt = false
+
+[functions.voice-profile]
+enabled = true
+verify_jwt = false
+
+[functions.sos]
+enabled = true
+verify_jwt = false

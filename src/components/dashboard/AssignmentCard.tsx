@@ -5,8 +5,10 @@ import {
 import { memo, type CSSProperties } from 'react'
 import { CATEGORY_META } from '../../lib/categories'
 import { useI18n } from '../../lib/i18n'
-import { ASSIGNMENT_META } from '../../lib/status'
+import { ASSIGNMENT_META, STATUS_META } from '../../lib/status'
 import type { AssignmentStatus } from '../../lib/types'
+import { UserUrgencyBadge } from '../map/UserUrgencyBadge'
+import { AttributeChips } from '../report/AttributeChips'
 import { AiLabel, CategoryIcon, StatusBadge, UrgencyBadge, useTimeAgo } from '../ui'
 import type { AssignmentActionKind, DashAssignment } from './types'
 import { directionsUrl, formatCountdown, formatDuration, formatKm, useNow } from './utils'
@@ -75,11 +77,6 @@ function AssignmentCardImpl({ a, selected, highlighted, pending, showOrg, onSele
   const km = formatKm(a.distance_m, t)
   const isFood = a.category === 'food' || a.food_servings != null || a.safe_until != null
   const claimedByOther = Boolean(a.claimed_org_id && a.claimed_org_id !== a.org_id && a.claimed_org_name)
-  const next = a.status === 'resolved' ? null : NEXT_ACTION[a.status]
-  const nextColor = next ? ASSIGNMENT_META[next.to].color : undefined
-  const resolvedIn = a.status === 'resolved' && a.resolved_at
-    ? formatDuration(new Date(a.resolved_at).getTime() - new Date(a.alerted_at).getTime(), t)
-    : null
 
   const cardStyle: CSSProperties = { borderInlineStartColor: statusMeta.color }
 
@@ -112,12 +109,16 @@ function AssignmentCardImpl({ a, selected, highlighted, pending, showOrg, onSele
               style={{ background: statusMeta.color }}>
               {lang === 'ur' ? statusMeta.ur : statusMeta.en}
             </span>
+            <UserUrgencyBadge value={a.user_urgency} size="sm" />
             {highlighted && (
               <span className="awaaz-dash-blink inline-flex items-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-black text-white">
                 {t('dashboard.newBadge')}
               </span>
             )}
           </div>
+
+          {/* what the reporter told the intake AI — danger first */}
+          <AttributeChips attributes={a.attributes} compact max={5} className="mt-2" />
 
           {a.cluster_status === 'unconfirmed' && (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg border-2 border-red-600 bg-red-50 px-2 py-1 text-xs font-extrabold text-red-700">
@@ -190,40 +191,59 @@ function AssignmentCardImpl({ a, selected, highlighted, pending, showOrg, onSele
         </p>
       )}
 
-      <div className="flex items-stretch gap-2 p-3 pt-2">
-        {next ? (
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => onAction(a, next.action)}
-            className="inline-flex min-h-14 flex-1 items-center justify-center gap-2 rounded-2xl px-4 text-lg font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
-            style={{ background: nextColor }}
-          >
-            {pending ? <Loader2 className="size-6 animate-spin" /> : <next.icon className="size-6" />}
-            {t(next.key)}
-          </button>
-        ) : (
-          <div className="inline-flex min-h-14 flex-1 items-center gap-2 rounded-2xl px-3 font-bold"
-            style={{ background: '#D1FAE5', color: ASSIGNMENT_META.resolved.color }}>
-            <CheckCheck className="size-6 shrink-0" />
-            <span className="min-w-0">
-              {resolvedIn ? t('dashboard.resolvedIn', { time: resolvedIn }) : t('dashboard.resolvedLabel')}
-              {a.resolved_at && <TimeAgo iso={a.resolved_at} className="block text-xs font-medium opacity-80" />}
-            </span>
-          </div>
-        )}
-        <a
-          href={directionsUrl(a.lat, a.lng)}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={t('dashboard.directions')}
-          title={t('dashboard.directions')}
-          className="inline-flex size-14 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-brand-700 hover:bg-slate-50"
-        >
-          <Navigation className="size-6" />
-        </a>
-      </div>
+      <AssignmentActions a={a} pending={pending} onAction={onAction} />
     </article>
+  )
+}
+
+/** Claim → Start work → Mark resolved (one big button for the next step) + directions. */
+export function AssignmentActions({ a, pending, onAction, to }: {
+  a: DashAssignment
+  pending?: boolean
+  onAction: (a: DashAssignment, action: AssignmentActionKind) => void
+  /** directions target (SOS: the live location) — defaults to the incident point */
+  to?: { lat: number; lng: number } | null
+}) {
+  const { t } = useI18n()
+  const next = a.status === 'resolved' ? null : NEXT_ACTION[a.status]
+  const nextColor = next ? ASSIGNMENT_META[next.to].color : undefined
+  const resolvedIn = a.status === 'resolved' && a.resolved_at
+    ? formatDuration(new Date(a.resolved_at).getTime() - new Date(a.alerted_at).getTime(), t)
+    : null
+  return (
+    <div className="flex items-stretch gap-2 p-3 pt-2">
+      {next ? (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => onAction(a, next.action)}
+          className="inline-flex min-h-14 flex-1 items-center justify-center gap-2 rounded-2xl px-4 text-lg font-bold text-white shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+          style={{ background: nextColor }}
+        >
+          {pending ? <Loader2 className="size-6 animate-spin" /> : <next.icon className="size-6" />}
+          {t(next.key)}
+        </button>
+      ) : (
+        <div className="inline-flex min-h-14 flex-1 items-center gap-2 rounded-2xl px-3 font-bold"
+          style={{ background: STATUS_META.resolved.soft, color: ASSIGNMENT_META.resolved.color }}>
+          <CheckCheck className="size-6 shrink-0" />
+          <span className="min-w-0">
+            {resolvedIn ? t('dashboard.resolvedIn', { time: resolvedIn }) : t('dashboard.resolvedLabel')}
+            {a.resolved_at && <TimeAgo iso={a.resolved_at} className="block text-xs font-medium opacity-80" />}
+          </span>
+        </div>
+      )}
+      <a
+        href={directionsUrl(to?.lat ?? a.lat, to?.lng ?? a.lng)}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={t('dashboard.directions')}
+        title={t('dashboard.directions')}
+        className="inline-flex size-14 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-brand-700 hover:bg-slate-50"
+      >
+        <Navigation className="size-6" />
+      </a>
+    </div>
   )
 }
 
