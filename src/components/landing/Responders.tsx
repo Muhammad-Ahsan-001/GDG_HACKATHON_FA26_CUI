@@ -30,7 +30,7 @@ export function Responders({ onRegister }: { onRegister: () => void }) {
                       {t('landing.demoPartner')}
                     </span>
                   </div>
-                  <h3 className="mt-3 text-lg font-black leading-tight text-ink">{t(`landing.org_${ot}`)}</h3>
+                  <h3 className="mt-3 text-lg font-black leading-tight text-slate-800">{t(`landing.org_${ot}`)}</h3>
                   <p className="mt-1 flex-1 text-sm leading-snug text-slate-600">{t(`landing.org_${ot}_body`)}</p>
                   <ul className="mt-3 flex flex-wrap gap-1.5" aria-label={t('landing.whoTitle')}>
                     {m.defaultCategories.map((c) => {
@@ -52,11 +52,12 @@ export function Responders({ onRegister }: { onRegister: () => void }) {
           })}
           <Reveal as="li" delay={0.35} y={18}>
             <button type="button" onClick={onRegister}
-              className="flex h-full min-h-44 w-full flex-col items-start justify-between rounded-3xl bg-linear-to-br from-brand-700 to-brand-900 p-5 text-start text-white shadow-lg shadow-brand-900/20 transition hover:-translate-y-0.5 active:scale-[0.99]">
-              <span className="inline-flex size-14 items-center justify-center rounded-2xl bg-white/15">
+              className="relative flex h-full min-h-44 w-full flex-col items-start justify-between overflow-hidden rounded-3xl bg-linear-to-br from-brand-600 via-brand-700 to-brand-700 p-5 text-start text-white shadow-[0_18px_40px_-18px_rgba(13,148,136,.7)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_48px_-18px_rgba(13,148,136,.8)] active:scale-[0.99]">
+              <span aria-hidden className="pointer-events-none absolute -end-10 -top-10 size-40 rounded-full bg-[radial-gradient(circle,rgba(251,191,36,.35),transparent_65%)]" />
+              <span className="relative inline-flex size-14 items-center justify-center rounded-2xl bg-white/20 ring-1 ring-white/30">
                 <Building2 className="size-7" />
               </span>
-              <span className="mt-4 flex w-full items-center justify-between gap-2 text-lg font-black leading-tight">
+              <span className="relative mt-4 flex w-full items-center justify-between gap-2 text-lg font-black leading-tight">
                 {t('landing.registerOrg')}
                 <ArrowRight className="size-5 shrink-0 rtl:-scale-x-100" />
               </span>

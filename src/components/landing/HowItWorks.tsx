@@ -98,8 +98,8 @@ function StepCard({ n, art, tint, titleKey, bodyKey, delay }: {
       <div className="flex h-full flex-col overflow-hidden rounded-[1.75rem] bg-white shadow-[0_1px_2px_rgba(15,23,42,.06),0_18px_40px_-18px_rgba(15,23,42,.18)] ring-1 ring-slate-200/80">
         <div className={clsx('relative h-48 overflow-hidden', tint)} aria-hidden>{art}</div>
         <div className="flex flex-1 flex-col p-5">
-          <span className="font-latin inline-flex w-fit items-center rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-black text-white">{t('landing.step', { n })}</span>
-          <Bi as="h3" k={titleKey} className="mt-3 text-xl font-black leading-tight text-ink" />
+          <span className="font-latin inline-flex w-fit items-center rounded-full bg-brand-50 px-2.5 py-0.5 text-xs font-black text-brand-700 ring-1 ring-brand-100">{t('landing.step', { n })}</span>
+          <Bi as="h3" k={titleKey} className="mt-3 text-xl font-black leading-tight text-slate-800" />
           <p className="mt-2 text-[0.95rem] leading-relaxed text-slate-600">{t(bodyKey)}</p>
         </div>
       </div>

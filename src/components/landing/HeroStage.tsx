@@ -1,4 +1,4 @@
-// Hero stage: glowing globe -> dive into Pakistan -> live Leaflet map of Islamabad with real pins.
+// Hero stage: bright daytime globe -> dive into Pakistan -> live Leaflet map of Islamabad with real pins.
 // Every heavy piece (cobe, d3-geo + world atlas, Leaflet) is its own lazy chunk; the placeholder sphere keeps the size fixed.
 import clsx from 'clsx'
 import { ArrowRight, Map as MapIcon } from 'lucide-react'
@@ -74,7 +74,7 @@ export function HeroStage({ pins, onOpen, openLabel }: { pins: LandingPin[] | nu
       {/* tap the globe to skip the intro */}
       {mode === 'webgl' && phase === 'globe' && (
         <button type="button" onClick={onArrive} aria-label={t('landing.stageOpen')}
-          className="absolute inset-[12%] z-10 cursor-pointer rounded-full focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-teal-300" />
+          className="absolute inset-[12%] z-10 cursor-pointer rounded-full focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-600" />
       )}
 
       {/* live map */}
@@ -91,16 +91,16 @@ export function HeroStage({ pins, onOpen, openLabel }: { pins: LandingPin[] | nu
       {showMap ? (
         <>
           <div className="lp-fade-in pointer-events-none absolute inset-x-3 top-3 z-10 flex justify-start" style={{ animationDelay: '.5s' }}>
-            <span className="inline-flex items-center gap-2 rounded-full bg-[#030916]/75 px-3 py-1.5 text-xs font-bold text-white shadow-lg ring-1 ring-white/15 backdrop-blur-sm">
+            <span className="inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-bold text-slate-700 shadow-lg shadow-teal-900/10 ring-1 ring-slate-200 backdrop-blur-sm">
               <span className="lp-live-dot" />
-              <span className="font-latin uppercase tracking-wider text-red-300">{t('landing.stageLive')}</span>
-              <span className="text-white/85">{count > 0 ? t('landing.stagePins', { n: count }) : t('landing.stagePinsNone')}</span>
+              <span className="font-latin uppercase tracking-wider text-red-600">{t('landing.stageLive')}</span>
+              <span className="text-slate-700">{count > 0 ? t('landing.stagePins', { n: count }) : t('landing.stagePinsNone')}</span>
             </span>
           </div>
           <div className="lp-fade-in absolute inset-x-3 bottom-7 z-10 flex justify-center" style={{ animationDelay: '.9s' }}>
             <button type="button" onClick={onOpen}
-              className="inline-flex min-h-11 items-center gap-2 rounded-full bg-white/95 px-4 text-sm font-bold text-[#06213a] shadow-xl shadow-black/30 transition hover:bg-white active:scale-95">
-              <MapIcon className="size-4 text-brand-700" />
+              className="inline-flex min-h-11 items-center gap-2 rounded-full bg-brand-700 px-4 text-sm font-bold text-white shadow-xl shadow-teal-900/25 ring-2 ring-white/80 transition hover:-translate-y-px hover:shadow-2xl active:scale-95">
+              <MapIcon className="size-4 text-amber-300" />
               {openLabel}
               <ArrowRight className="size-4 rtl:-scale-x-100" />
             </button>
@@ -109,14 +109,14 @@ export function HeroStage({ pins, onOpen, openLabel }: { pins: LandingPin[] | nu
       ) : mode === 'static' ? (
         <div className="absolute inset-x-3 bottom-1 z-10 flex justify-center">
           <button type="button" onClick={() => setMapWanted(true)} disabled={mapWanted}
-            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-white/95 px-4 text-sm font-bold text-[#06213a] shadow-xl shadow-black/30 transition hover:bg-white active:scale-95 disabled:opacity-80">
-            <MapIcon className="size-4 text-brand-700" />
+            className="inline-flex min-h-11 items-center gap-2 rounded-full bg-brand-700 px-4 text-sm font-bold text-white shadow-xl shadow-teal-900/25 ring-2 ring-white/80 transition hover:-translate-y-px hover:shadow-2xl active:scale-95 disabled:opacity-80">
+            <MapIcon className="size-4 text-amber-300" />
             {mapWanted ? t('landing.stageLoading') : t('landing.stageOpen')}
           </button>
         </div>
       ) : (
         <div className={clsx('pointer-events-none absolute inset-x-0 -bottom-1 z-10 flex justify-center transition-opacity duration-700', arrived ? 'opacity-100' : 'opacity-0')}>
-          <span className="rounded-full bg-[#030916]/70 px-3 py-1 text-xs font-semibold text-teal-100 ring-1 ring-teal-300/25">
+          <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-brand-700 shadow-sm ring-1 ring-brand-100 backdrop-blur-sm">
             {t('landing.stageGlobe')}
           </span>
         </div>

@@ -69,7 +69,7 @@ export default function Landing() {
         <div className="lp-root min-h-full">
           {/* ---------------- hero ---------------- */}
           <section className="lp-sky relative isolate flex min-h-svh flex-col overflow-hidden">
-            <div aria-hidden className="lp-stars pointer-events-none absolute inset-0" />
+            <div aria-hidden className="lp-dots pointer-events-none absolute inset-0" />
             <div aria-hidden className="lp-grain pointer-events-none absolute inset-0" />
             <div aria-hidden className="lp-horizon pointer-events-none absolute inset-x-0 bottom-0 h-1/3" />
 
@@ -78,11 +78,11 @@ export default function Landing() {
               <span className="flex-1" />
               <LangToggle />
               <button type="button" onClick={() => go('/login')} aria-label={t('landing.signIn')} title={t('landing.signIn')}
-                className="inline-flex size-11 items-center justify-center rounded-full bg-white/10 text-white ring-1 ring-white/15 transition hover:bg-white/20 active:scale-95 lg:hidden">
+                className="inline-flex size-11 items-center justify-center rounded-full bg-white/80 text-slate-700 shadow-sm ring-1 ring-slate-200 backdrop-blur transition hover:bg-white hover:text-brand-700 active:scale-95 lg:hidden">
                 <LogIn className="size-5 rtl:-scale-x-100" />
               </button>
               <button type="button" onClick={() => go('/login')}
-                className="hidden min-h-11 items-center gap-2 rounded-full bg-white/10 px-4 text-sm font-semibold text-white ring-1 ring-white/15 transition hover:bg-white/20 lg:inline-flex">
+                className="hidden min-h-11 items-center gap-2 rounded-full bg-white/80 px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 backdrop-blur transition hover:bg-white hover:text-brand-700 lg:inline-flex">
                 <LogIn className="size-4 rtl:-scale-x-100" />
                 {t('landing.signIn')}
               </button>
@@ -94,13 +94,13 @@ export default function Landing() {
               </div>
 
               <div className="text-center lg:order-1 lg:text-left lg:rtl:text-right">
-                <p className="hidden items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold text-teal-100 ring-1 ring-white/15 sm:inline-flex sm:text-sm">
+                <p className="hidden items-center gap-2 rounded-full bg-white/85 px-3 py-1 text-xs font-bold text-brand-700 shadow-sm ring-1 ring-brand-100 backdrop-blur sm:inline-flex sm:text-sm">
                   <span className="lp-live-dot" />
                   {t('landing.liveIn')}
                 </p>
 
                 <h1 className="sm:mt-3">
-                  <span lang="ur" dir="rtl" className="font-urdu block text-[2.3rem] font-bold leading-[1.75] text-white sm:text-5xl lg:text-[3.6rem] lg:leading-[1.7]">
+                  <span lang="ur" dir="rtl" className="font-urdu block text-[2.3rem] font-bold leading-[1.75] text-slate-800 sm:text-5xl lg:text-[3.6rem] lg:leading-[1.7]">
                     <Phrases text={translate('ur', 'landing.headlinePrimary')} />
                   </span>
                   <span lang="en" dir="ltr" className="font-latin lp-grad-text mt-1 block text-balance text-[1.7rem] font-black leading-[1.15]! tracking-tight sm:text-4xl lg:text-5xl">
@@ -108,37 +108,37 @@ export default function Landing() {
                   </span>
                 </h1>
 
-                <p className="mx-auto mt-3 max-w-xl text-[0.95rem] leading-relaxed text-white/80 sm:mt-4 sm:text-lg lg:mx-0">{t('landing.valueProp')}</p>
+                <p className="mx-auto mt-3 max-w-xl text-[0.95rem] leading-relaxed text-slate-600 sm:mt-4 sm:text-lg lg:mx-0">{t('landing.valueProp')}</p>
 
                 <div className="mx-auto mt-5 max-w-md sm:mt-6 lg:mx-0 lg:max-w-lg">
                   <button ref={ctaRef} type="button" onClick={start} disabled={loading}
-                    className="lp-cta-shine group flex min-h-[4.75rem] w-full items-center gap-3 rounded-full bg-white py-2 pe-5 ps-2 text-start text-[1.35rem] font-black leading-tight text-[#06213a] shadow-[0_20px_50px_-12px_rgba(45,212,191,.45)] transition hover:bg-teal-50 active:scale-[0.98] disabled:opacity-80 sm:text-2xl">
-                    <span className="relative inline-flex size-[3.75rem] shrink-0 items-center justify-center rounded-full bg-linear-to-b from-amber-400 to-amber-500 text-white shadow-lg shadow-amber-500/40">
+                    className="lp-cta-shine group flex min-h-[4.75rem] w-full items-center gap-3 rounded-full bg-linear-to-br from-brand-600 to-brand-700 py-2 pe-5 ps-2 text-start text-[1.35rem] font-black leading-tight text-white shadow-[0_22px_48px_-14px_rgba(13,148,136,.65)] ring-1 ring-white/40 transition hover:shadow-[0_26px_56px_-14px_rgba(13,148,136,.75)] hover:brightness-105 active:scale-[0.98] disabled:opacity-80 sm:text-2xl">
+                    <span className="relative inline-flex size-[3.75rem] shrink-0 items-center justify-center rounded-full bg-linear-to-b from-amber-400 to-amber-500 text-white shadow-lg shadow-amber-600/40 ring-2 ring-white/70">
                       {!ready && <><span className="lp-cta-ring" /><span className="lp-cta-ring lp-d2" /></>}
                       <StartIcon className="relative size-8" />
                     </span>
                     <span className="min-w-0 flex-1">{startLabel}</span>
                     <ArrowRight className="size-7 shrink-0 transition group-hover:translate-x-1 rtl:-scale-x-100 rtl:group-hover:-translate-x-1" />
                   </button>
-                  <p className="mt-2.5 text-sm text-white/65">{t('landing.startSub')}</p>
+                  <p className="mt-2.5 text-sm text-slate-600">{t('landing.startSub')}</p>
                 </div>
 
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-3 sm:mt-5 lg:justify-start">
-                  <VoiceGuide prompt="welcome" size={52} className="bg-amber-300/15! text-amber-100! ring-amber-300/40!" />
+                  <VoiceGuide prompt="welcome" size={52} className="bg-amber-50! shadow-md! shadow-amber-500/15! ring-amber-300!" />
                   <button type="button" onClick={() => go('/login')}
-                    className="inline-flex min-h-[3.25rem] items-center gap-2 rounded-full px-4 text-sm font-semibold text-white/85 ring-1 ring-white/20 transition hover:bg-white/10 lg:hidden">
+                    className="inline-flex min-h-[3.25rem] items-center gap-2 rounded-full bg-white/80 px-4 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 backdrop-blur transition hover:bg-white hover:text-brand-700 lg:hidden">
                     <LogIn className="size-4 rtl:-scale-x-100" />
                     {t('landing.signInShort')}
                   </button>
                 </div>
-                <p lang={other} className={clsx('mt-3 text-xs text-white/45', other === 'ur' ? 'font-urdu' : 'font-latin')}>
+                <p lang={other} className={clsx('mt-3 text-xs text-slate-500', other === 'ur' ? 'font-urdu' : 'font-latin')}>
                   <bdi dir={other === 'ur' ? 'rtl' : 'ltr'}>{translate(other, 'landing.valueProp')}</bdi>
                 </p>
               </div>
             </div>
 
             <a href="#how" aria-label={t('landing.scrollHint')}
-              className="lp-bounce absolute bottom-3 start-1/2 z-10 hidden -translate-x-1/2 items-center gap-1 text-xs font-semibold text-white/55 hover:text-white/80 sm:inline-flex rtl:translate-x-1/2">
+              className="lp-bounce absolute bottom-3 start-1/2 z-10 hidden -translate-x-1/2 items-center gap-1 text-xs font-semibold text-slate-500 hover:text-brand-700 sm:inline-flex rtl:translate-x-1/2">
               {t('landing.scrollHint')} <ChevronDown className="size-4" />
             </a>
           </section>
@@ -157,8 +157,8 @@ export default function Landing() {
           {/* phones: Start stays one tap away */}
           <div className={clsx('lp-float fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 lg:hidden', ctaVisible && 'is-hidden')}>
             <button type="button" onClick={start} tabIndex={ctaVisible ? -1 : 0}
-              className="mx-auto flex min-h-16 w-full max-w-md items-center gap-3 rounded-full bg-[#06213a] py-2 pe-5 ps-2 text-lg font-black text-white shadow-2xl shadow-black/40 ring-1 ring-white/15 active:scale-[0.98]">
-              <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-linear-to-b from-amber-400 to-amber-500">
+              className="mx-auto flex min-h-16 w-full max-w-md items-center gap-3 rounded-full bg-brand-700 py-2 pe-5 ps-2 text-lg font-black text-white shadow-2xl shadow-teal-900/30 ring-2 ring-white/80 active:scale-[0.98]">
+              <span className="inline-flex size-12 shrink-0 items-center justify-center rounded-full bg-linear-to-b from-amber-400 to-amber-500 ring-2 ring-white/70">
                 <StartIcon className="size-6" />
               </span>
               <span className="min-w-0 flex-1 text-start">{startLabel}</span>

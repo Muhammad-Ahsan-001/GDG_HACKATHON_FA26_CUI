@@ -86,16 +86,16 @@ export function Reveal({ children, className, delay = 0, y = 26, as = 'div' }: {
   )
 }
 
-/** Section heading: eyebrow + bilingual title + sub line. */
-export function SectionHead({ eyebrow, titleKey, subKey, dark, className }: {
-  eyebrow?: ReactNode; titleKey: string; subKey?: string; dark?: boolean; className?: string
+/** Section heading: eyebrow + bilingual title + sub line (light sections only). */
+export function SectionHead({ eyebrow, titleKey, subKey, className }: {
+  eyebrow?: ReactNode; titleKey: string; subKey?: string; className?: string
 }) {
   const { t } = useI18n()
   return (
     <Reveal className={clsx('mx-auto max-w-2xl text-center', className)}>
       {eyebrow}
-      <Bi as="h2" k={titleKey} className={clsx('text-3xl font-black tracking-tight sm:text-4xl', dark ? 'text-white' : 'text-ink')} />
-      {subKey && <p className={clsx('mt-3 text-base sm:text-lg', dark ? 'text-white/70' : 'text-slate-600')}>{t(subKey)}</p>}
+      <Bi as="h2" k={titleKey} className="text-3xl font-black tracking-tight text-slate-800 sm:text-4xl" />
+      {subKey && <p className="mt-3 text-base text-slate-600 sm:text-lg">{t(subKey)}</p>}
     </Reveal>
   )
 }

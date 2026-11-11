@@ -1,12 +1,13 @@
-// Lazy chunk: the WebGL dotted globe (cobe). Spins, decelerates onto Pakistan, then dives in (scale) and
-// tells the stage to cross-fade into the live Leaflet map. Pauses when off-screen or the tab is hidden.
+// Lazy chunk: the WebGL dotted globe (cobe), daytime look: light mint sphere, teal-slate dotted continents,
+// teal arcs, amber Islamabad. Spins, decelerates onto Pakistan, then dives in (scale) and tells the stage to
+// cross-fade into the live Leaflet map. Pauses when off-screen or the tab is hidden.
 import createGlobe, { type Arc, type Marker } from 'cobe'
 import { useEffect, useRef } from 'react'
 
 const D = Math.PI / 180
 const ISB: [number, number] = [33.6844, 73.0479]
 
-// [lat, lng, size] — Islamabad & Rawalpindi lead, other Pakistani cities glow softer
+// [lat, lng, size] — Islamabad & Rawalpindi lead (amber), other Pakistani cities in brand teal
 const CITIES: [number, number, number][] = [
   [33.6844, 73.0479, 0.075], // Islamabad
   [33.5651, 73.0169, 0.055], // Rawalpindi
@@ -17,8 +18,8 @@ const CITIES: [number, number, number][] = [
   [30.1575, 71.5249, 0.03],  // Multan
   [31.4504, 73.135, 0.03],   // Faisalabad
 ]
-const AMBER: [number, number, number] = [1, 0.74, 0.28]
-const TEAL: [number, number, number] = [0.37, 0.95, 0.85]
+const AMBER: [number, number, number] = [0.96, 0.62, 0.04] // #f59e0b
+const TEAL: [number, number, number] = [0.05, 0.58, 0.53]  // #0d9488 (brand-600: reads on the light sphere)
 const ARCS: Arc[] = [CITIES[2], CITIES[3], CITIES[4], CITIES[5]].map(([la, ln]) => ({ from: [la, ln], to: ISB }))
 
 // cobe: a point faces the camera when phi = 3π/2 − lng and theta = lat
@@ -83,22 +84,24 @@ export default function CobeGlobe({ onReady, onArrive, label }: {
       height: size,
       phi: START_PHI,
       theta: START_THETA,
-      dark: 1,
-      diffuse: 1.25,
+      // light mode: dots are drawn as a darker shade of baseColor, so a mint base gives teal-slate continents.
+      // mapBrightness stays < 1 so dot centres never clip to black; dense samples keep the land legible on white.
+      dark: 0,
+      diffuse: 1,
       scale: 1,
-      mapSamples: 18000,
-      mapBrightness: 5.5,
-      mapBaseBrightness: 0.02,
-      baseColor: [0.16, 0.36, 0.44],
+      mapSamples: 30000,
+      mapBrightness: 0.85,
+      mapBaseBrightness: 0,
+      baseColor: [0.78, 0.96, 0.93],
       markerColor: AMBER,
-      glowColor: [0.07, 0.42, 0.42],
+      glowColor: [0.6, 0.9, 0.85],
       markers: markers(0),
       arcs: ARCS,
       arcColor: TEAL,
       arcWidth: 0.5,
       arcHeight: 0.22,
       markerElevation: 0.01,
-      opacity: 0.92,
+      opacity: 1,
     })
 
     const ro = new ResizeObserver(() => {
@@ -163,8 +166,8 @@ export default function CobeGlobe({ onReady, onArrive, label }: {
       <div ref={hostRef} className="absolute inset-0" />
       {label && (
         <div ref={labelRef} className="lp-city-label" style={{ opacity: 0 }} aria-hidden="true">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#030916]/75 px-2.5 py-1 text-xs font-bold text-amber-200 shadow-lg ring-1 ring-amber-300/40">
-            <span className="size-1.5 rounded-full bg-amber-300" />
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1 text-xs font-bold text-amber-800 shadow-lg shadow-amber-900/10 ring-1 ring-amber-300">
+            <span className="size-1.5 rounded-full bg-amber-500" />
             {label}
           </span>
         </div>

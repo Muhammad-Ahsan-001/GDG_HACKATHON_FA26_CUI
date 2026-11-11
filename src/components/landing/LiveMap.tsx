@@ -1,5 +1,6 @@
 // Lazy chunk: the hero's live Leaflet map of Islamabad/Rawalpindi with real pins popping in one by one.
 // Plain Leaflet (no react-leaflet / clustering): a showcase, so it is non-interactive and stays light.
+// Standard light OpenStreetMap tiles (no night filter): see .lp-map in landing.css.
 import L from 'leaflet'
 import { useEffect, useRef } from 'react'
 import { config } from '../../config'

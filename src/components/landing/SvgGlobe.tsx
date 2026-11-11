@@ -1,4 +1,5 @@
-// Lazy chunk: static SVG globe centred on Pakistan (reduced motion / low-end / no WebGL). No animation loop.
+// Lazy chunk: static light SVG globe centred on Pakistan (reduced motion / low-end / no WebGL). No animation loop.
+// Same daytime palette as the cobe globe: mint sphere, teal-slate land, Pakistan in brand teal, amber Islamabad.
 import { geoGraticule10, geoOrthographic, geoPath } from 'd3-geo'
 import { useEffect, useMemo, useState } from 'react'
 import { feature } from 'topojson-client'
@@ -44,39 +45,40 @@ export default function SvgGlobe({ onReady, label }: { onReady?: () => void; lab
   return (
     <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="absolute inset-0 size-full" aria-hidden="true">
       <defs>
-        <radialGradient id="lp-sg-sphere" cx="38%" cy="32%" r="75%">
-          <stop offset="0%" stopColor="#174566" />
-          <stop offset="55%" stopColor="#0a223b" />
-          <stop offset="100%" stopColor="#040c1c" />
+        <radialGradient id="lp-sg-sphere" cx="40%" cy="34%" r="72%">
+          <stop offset="0%" stopColor="#f0fffc" />
+          <stop offset="55%" stopColor="#d4f8f2" />
+          <stop offset="90%" stopColor="#ade9e0" />
+          <stop offset="100%" stopColor="#c6f4ec" />
         </radialGradient>
         <radialGradient id="lp-sg-glow" cx="50%" cy="50%" r="50%">
           <stop offset="70%" stopColor="#2dd4bf" stopOpacity="0" />
-          <stop offset="88%" stopColor="#2dd4bf" stopOpacity=".22" />
-          <stop offset="100%" stopColor="#2dd4bf" stopOpacity="0" />
+          <stop offset="86%" stopColor="#2dd4bf" stopOpacity=".28" />
+          <stop offset="100%" stopColor="#99f6e4" stopOpacity="0" />
         </radialGradient>
       </defs>
       <circle cx={SIZE / 2} cy={SIZE / 2} r={SIZE * 0.46} fill="url(#lp-sg-glow)" />
-      <path d={sphere} fill="url(#lp-sg-sphere)" stroke="rgba(153,246,228,.35)" strokeWidth="1" />
-      <path d={graticule} fill="none" stroke="rgba(153,246,228,.08)" strokeWidth=".6" />
+      <path d={sphere} fill="url(#lp-sg-sphere)" stroke="rgba(255,255,255,.95)" strokeWidth="1.5" />
+      <path d={graticule} fill="none" stroke="rgba(15,118,110,.10)" strokeWidth=".6" />
       {shapes.map((s, i) => (
         <path key={i} d={s.d}
-          fill={s.pk ? 'rgba(45,212,191,.55)' : 'rgba(94,234,212,.16)'}
-          stroke={s.pk ? '#99f6e4' : 'rgba(153,246,228,.28)'} strokeWidth={s.pk ? 1.2 : 0.5} />
+          fill={s.pk ? 'rgba(20,184,166,.6)' : 'rgba(71,107,103,.26)'}
+          stroke={s.pk ? '#0f766e' : 'rgba(71,107,103,.38)'} strokeWidth={s.pk ? 1.2 : 0.5} />
       ))}
       {CITIES.map(([ln, la, r], i) => {
         const p = projection([ln, la])
         if (!p) return null
         return (
           <g key={i}>
-            <circle cx={p[0]} cy={p[1]} r={r * 2.2} fill={i < 2 ? 'rgba(251,191,36,.25)' : 'rgba(94,234,212,.2)'} />
-            <circle cx={p[0]} cy={p[1]} r={r * 0.8} fill={i < 2 ? '#fbbf24' : '#5eead4'} />
+            <circle cx={p[0]} cy={p[1]} r={r * 2.2} fill={i < 2 ? 'rgba(245,158,11,.28)' : 'rgba(13,148,136,.2)'} />
+            <circle cx={p[0]} cy={p[1]} r={r * 0.8} fill={i < 2 ? '#f59e0b' : '#0d9488'} stroke="#fff" strokeWidth=".8" />
           </g>
         )
       })}
       {label && isb && (
         <g transform={`translate(${isb[0]}, ${isb[1] - 22})`}>
-          <rect x={-label.length * 3.6 - 10} y={-12} width={label.length * 7.2 + 20} height={22} rx={11} fill="rgba(3,9,22,.8)" stroke="rgba(252,211,77,.45)" />
-          <text textAnchor="middle" y={4} fill="#fde68a" fontSize="12" fontWeight="700" fontFamily="Inter, sans-serif">{label}</text>
+          <rect x={-label.length * 3.6 - 10} y={-12} width={label.length * 7.2 + 20} height={22} rx={11} fill="rgba(255,255,255,.95)" stroke="#fcd34d" />
+          <text textAnchor="middle" y={4} fill="#92400e" fontSize="12" fontWeight="700" fontFamily="Inter, sans-serif">{label}</text>
         </g>
       )}
     </svg>
