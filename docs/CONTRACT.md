@@ -339,3 +339,13 @@ login) · `/report` (report sheet over map) · `/pin/:id` (pin sheet over map) �
   reasoning.effort "low", NO temperature), vision = `gpt-6.1-terra`, STT = `gpt-transcribe` (languages[]), TTS = `gpt-4o-mini-tts`.
 - lead: frontend shared header = `src/components/layout/AppHeader.tsx` (`<AppHeader floating? right? />`).
 - lead: demo accounts list = `src/lib/demoAccounts.ts` (password constant DEMO_PASSWORD).
+- lead (user decision 2026-11-11): **Google Maps is replaced by Leaflet + OpenStreetMap** (react-leaflet 5, leaflet 1.9,
+  leaflet.markercluster). Shared layer: `src/components/leaflet/BaseMap.tsx` (BaseMap, FlyTo, InvalidateOnResize,
+  ClusterLayer with id-diffed markers), `src/components/leaflet/icons.ts` (pinIcon — category colour + icon + status ring +
+  count bubble, dotIcon, userDotIcon, pickIcon; built from vanilla `lucide` icon nodes), `src/components/leaflet/leaflet.css`,
+  `src/lib/geocode.ts` (Nominatim `searchPlace`, submit-only). Tiles: `config.tiles` (OSM standard, attribution required).
+  No Google Maps key/mapId anywhere; react-leaflet `<Circle>` for service areas; map click / draggable `pickIcon` marker for
+  location picking. Service worker may runtime-cache `tile.openstreetmap.org` tiles (CacheFirst, ~600 entries, 7 days, honour headers; no bulk prefetch).
+- integrator: MapPage + DashboardMap ported from @vis.gl/react-google-maps to the shared Leaflet layer (ClusterLayer + pinIcon,
+  react-leaflet Circle for service areas); `config.mapsApiKey/mapId` removed, `map/UserDot.tsx` deleted, PinMarker.tsx keeps only
+  `PinGlyph` (used by PinList). `DigestResponse.ai?: boolean` added. FCM `fcm_options.link` sent only when HTTPS.

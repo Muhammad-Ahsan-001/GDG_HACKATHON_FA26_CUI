@@ -16,3 +16,7 @@ logs
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+.vercel
+.env*
+!.env.example
