@@ -64,7 +64,7 @@ export function ReportsChart({ data }: { data: DayPoint[] }) {
         <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-xs font-semibold" role="group">
           {[false, true].map((v) => (
             <button key={String(v)} type="button" onClick={() => setTable(v)} aria-pressed={table === v}
-              className={clsx('min-h-7 rounded-md px-2.5', table === v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500')}>
+              className={clsx('min-h-7 rounded-md px-2.5', table === v ? 'bg-white text-brand-700 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>
               {t(v ? 'admin.chart_showTable' : 'admin.chart_showChart')}
             </button>
           ))}
@@ -137,16 +137,16 @@ export function ReportsChart({ data }: { data: DayPoint[] }) {
           </svg>
           {hp && hover !== null && (
             <div
-              className="pointer-events-none absolute z-10 min-w-36 -translate-x-1/2 rounded-xl bg-slate-900 px-3 py-2 text-xs text-white shadow-xl"
+              className="pointer-events-none absolute z-10 min-w-36 -translate-x-1/2 rounded-xl bg-white/95 px-3 py-2 text-xs text-slate-700 shadow-[0_14px_32px_-12px_rgb(15_118_110/0.35)] ring-1 ring-slate-200 backdrop-blur-md"
               style={{
                 left: Math.min(w - 76, Math.max(76, M.left + band * hover + band / 2)),
                 top: Math.max(0, y(hp.reports) - 86),
               }}
             >
-              <div className="mb-1 font-semibold text-white/70">{fmtDay(hp.day)}</div>
-              <div className="flex items-center justify-between gap-4"><span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-sm" style={{ background: BAR }} />{t('admin.chart_reports')}</span><b className="font-latin tabular-nums">{hp.reports}</b></div>
-              <div className="flex items-center justify-between gap-4 text-white/70"><span>{t('admin.chart_spam')}</span><span className="font-latin tabular-nums">{hp.spam}</span></div>
-              <div className="flex items-center justify-between gap-4 text-white/70"><span>{t('admin.chart_sos')}</span><span className="font-latin tabular-nums">{hp.sos}</span></div>
+              <div className="mb-1 font-semibold text-slate-500">{fmtDay(hp.day)}</div>
+              <div className="flex items-center justify-between gap-4"><span className="inline-flex items-center gap-1.5"><span className="size-2 rounded-sm" style={{ background: BAR }} />{t('admin.chart_reports')}</span><b className="font-latin tabular-nums text-slate-800">{hp.reports}</b></div>
+              <div className="flex items-center justify-between gap-4 text-slate-500"><span>{t('admin.chart_spam')}</span><span className="font-latin tabular-nums">{hp.spam}</span></div>
+              <div className="flex items-center justify-between gap-4 text-slate-500"><span>{t('admin.chart_sos')}</span><span className="font-latin tabular-nums">{hp.sos}</span></div>
             </div>
           )}
         </div>

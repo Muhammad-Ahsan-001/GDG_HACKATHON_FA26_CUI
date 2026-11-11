@@ -28,8 +28,8 @@ function AudioClip({ path, n }: { path: string; n: number }) {
   if (url) return <audio controls autoPlay src={url} className="h-10 w-full" preload="none" />
   return (
     <button type="button" onClick={() => { void load() }} disabled={state === 'loading'}
-      className="flex min-h-11 w-full items-center gap-3 rounded-xl bg-slate-50 px-3 text-start text-sm font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100">
-      {state === 'loading' ? <Spinner className="size-4" /> : <span className="inline-flex size-7 items-center justify-center rounded-full bg-brand-700 text-white"><Play className="size-3.5" /></span>}
+      className="flex min-h-11 w-full items-center gap-3 rounded-xl bg-gradient-to-r from-amber-50 to-white px-3 text-start text-sm font-semibold text-slate-700 ring-1 ring-amber-200/70 hover:from-amber-100/70">
+      {state === 'loading' ? <Spinner className="size-4" /> : <span className="inline-flex size-7 items-center justify-center rounded-full bg-amber-500 text-amber-950 shadow-sm"><Play className="size-3.5" /></span>}
       <span className="flex-1">{state === 'error' ? t('admin.d_audioErr') : t('admin.d_audioLoad', { n })}</span>
       <FileAudio className="size-4 text-slate-400" />
     </button>
@@ -77,11 +77,11 @@ export function ReportDrawer({ report: r, onClose, onChanged }: {
       <div className="flex items-start gap-3">
         <CategoryIcon category={r.category} size={44} />
         <div className="min-w-0">
-          <div className="text-lg font-bold leading-snug text-slate-900">{pick(r.title_en, r.title_ur) || t('admin.untitled')}</div>
+          <div className="text-lg font-bold leading-snug text-slate-800">{pick(r.title_en, r.title_ur) || t('admin.untitled')}</div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <StatusBadge status={r.cluster_status ?? r.status} className="!py-0.5 !text-xs" />
             <UrgencyBadge urgency={r.urgency} />
-            {r.is_spam && <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-xs font-bold text-white"><ShieldBan className="size-3" />{t('admin.spam')}</span>}
+            {r.is_spam && <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 ring-1 ring-slate-300/70"><ShieldBan className="size-3" />{t('admin.spam')}</span>}
             {r.is_private && <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-700"><Lock className="size-3" />{t('admin.private')}</span>}
             <span className="text-xs text-slate-500">{ago(r.created_at)} · {fmtDateTime(r.created_at)}</span>
           </div>
@@ -93,7 +93,7 @@ export function ReportDrawer({ report: r, onClose, onChanged }: {
           {r.is_private && <div className="mb-4 flex items-center gap-2 rounded-xl bg-violet-50 p-3 text-sm font-semibold text-violet-800 ring-1 ring-violet-100"><Lock className="size-4" />{t('admin.d_privateNote')}</div>}
 
           {/* moderation */}
-          <div className="mb-5 grid gap-2 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100 sm:grid-cols-2">
+          <div className="mb-5 grid gap-2 rounded-2xl bg-gradient-to-br from-slate-50 to-brand-50/60 p-3 ring-1 ring-slate-200/60 sm:grid-cols-2">
             <label className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
               <span className="text-sm font-semibold text-slate-700">{t('admin.markSpam')}</span>
               <Switch checked={r.is_spam} onChange={(v) => { void setSpam(v) }} label={t('admin.markSpam')} disabled={busy} tone="red" />
@@ -113,7 +113,7 @@ export function ReportDrawer({ report: r, onClose, onChanged }: {
                 <Confidence value={r.confidence} />
                 {r.ai_provider && <span className="font-latin text-xs text-slate-500">{t('admin.d_model', { p: r.ai_provider })}</span>}
               </div>
-              {r.ai_reason && <p className="mt-2 text-sm leading-relaxed text-slate-700"><b className="text-slate-900">{t('admin.d_reason')}: </b><bdi>{r.ai_reason}</bdi></p>}
+              {r.ai_reason && <p className="mt-2 text-sm leading-relaxed text-slate-700"><b className="text-slate-800">{t('admin.d_reason')}: </b><bdi>{r.ai_reason}</bdi></p>}
               {r.is_spam && r.spam_reason && <p className="mt-2 text-sm text-slate-700">{t('admin.d_spamReason', { r: r.spam_reason })}</p>}
               {r.photo_check && typeof r.photo_check.matches_claim === 'boolean' && (
                 <p className={clsx('mt-2 inline-flex items-center gap-1.5 text-sm font-semibold', r.photo_check.matches_claim ? 'text-green-700' : 'text-amber-700')}>
@@ -191,7 +191,7 @@ export function ReportDrawer({ report: r, onClose, onChanged }: {
                 {role ? <role.icon className="size-5" /> : <User className="size-5" />}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="font-semibold text-slate-900">{r.reporter_name || (r.reporter_anonymous ? t('admin.anonReporter') : t('admin.unnamed'))}</div>
+                <div className="font-semibold text-slate-800">{r.reporter_name || (r.reporter_anonymous ? t('admin.anonReporter') : t('admin.unnamed'))}</div>
                 {r.reporter_email && <div className="font-latin truncate text-sm text-slate-500" dir="ltr">{r.reporter_email}</div>}
               </div>
               {typeof r.reporter_trust === 'number' && (

@@ -36,7 +36,7 @@ function useBadges(): Partial<Record<Section, { n: number; tone: 'red' | 'amber'
 const BADGE_TONE = {
   red: 'bg-red-500 text-white',
   amber: 'bg-amber-400 text-amber-950',
-  muted: 'bg-white/12 text-white/80',
+  muted: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200/80',
 }
 
 export function LivePill({ live, className }: { live: LiveState; className?: string }) {
@@ -77,7 +77,7 @@ function SearchBox({ className, inputRef }: { className?: string; inputRef?: Ref
         onChange={(e) => setVal(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Escape') { setVal(''); setSearch('') } }}
         placeholder={t('admin.search')}
-        className="min-h-10 w-full rounded-xl border-0 bg-slate-100/80 pe-16 ps-10 text-sm text-slate-900 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-brand-500 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+        className="min-h-10 w-full rounded-xl border-0 bg-slate-100/80 pe-16 ps-10 text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-brand-500 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
       />
       {val ? (
         <button type="button" onClick={() => { setVal(''); setSearch('') }} aria-label={t('admin.clearSearch')}
@@ -109,11 +109,11 @@ function NavList({ onPick, compact }: { onPick?: () => void; compact?: boolean }
           return (
             <button key={s} ref={active ? activeRef : undefined} type="button" onClick={() => go(s)} aria-current={active ? 'page' : undefined}
               className={clsx('inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl px-3 text-sm font-semibold transition',
-                active ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200')}>
+                active ? 'adm-pill bg-brand-700 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-brand-50 hover:text-brand-900')}>
               <Icon className="size-4" />
               {t(`admin.nav_${s}`)}
               {b && <span className={clsx('font-latin rounded-full px-1.5 text-[11px] font-bold tabular-nums',
-                b.tone === 'muted' ? (active ? 'bg-white/20' : 'bg-slate-100 text-slate-600') : BADGE_TONE[b.tone])}>{b.n}</span>}
+                b.tone === 'muted' ? (active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600') : BADGE_TONE[b.tone])}>{b.n}</span>}
             </button>
           )
         })}
@@ -130,13 +130,13 @@ function NavList({ onPick, compact }: { onPick?: () => void; compact?: boolean }
           <button key={s} type="button" onClick={() => { go(s); onPick?.() }} aria-current={active ? 'page' : undefined}
             className={clsx(
               'group relative flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-start text-[14px] font-semibold transition',
-              active ? 'bg-white/10 text-white' : 'text-white/65 hover:bg-white/5 hover:text-white',
+              active ? 'adm-pill bg-brand-700 text-white' : 'text-slate-600 hover:bg-white hover:text-slate-800 hover:shadow-[0_1px_2px_rgb(15_23_42/0.06)] hover:ring-1 hover:ring-slate-200/70',
             )}>
-            {active && <span className="absolute inset-y-2 start-0 w-1 rounded-full bg-brand-500" />}
-            <Icon className={clsx('size-[18px] shrink-0', active ? 'text-brand-500' : 'text-white/50 group-hover:text-white/80')} />
+            <Icon className={clsx('size-[18px] shrink-0', active ? 'text-white' : 'text-slate-400 group-hover:text-brand-700')} />
             <span className="flex-1 truncate">{t(`admin.nav_${s}`)}</span>
             {b && (
-              <span className={clsx('font-latin inline-flex min-w-6 items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums', BADGE_TONE[b.tone])}>
+              <span className={clsx('font-latin inline-flex min-w-6 items-center justify-center rounded-full px-1.5 text-[11px] font-bold tabular-nums',
+                b.tone === 'muted' && active ? 'bg-white/20 text-white' : BADGE_TONE[b.tone])}>
                 {b.n}
               </span>
             )}
@@ -147,14 +147,14 @@ function NavList({ onPick, compact }: { onPick?: () => void; compact?: boolean }
   )
 }
 
-function Logo({ dark }: { dark?: boolean }) {
+function Logo({ side }: { side?: boolean }) {
   const { t } = useI18n()
   return (
     <div className="flex items-center gap-2.5">
-      <span className="inline-flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-base font-black text-white shadow-sm">آ</span>
+      <span className="inline-flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-base font-black text-white shadow-[0_6px_14px_-6px_rgb(15_118_110/0.6)] ring-1 ring-white/60">آ</span>
       <div className="leading-tight">
-        <div className={clsx('font-black tracking-tight', dark ? 'text-white' : 'text-slate-900')}>{t('common.appName')}</div>
-        <div className={clsx('text-[11px] font-semibold', dark ? 'text-white/50' : 'hidden text-slate-500 sm:block')}>{t('admin.console')}</div>
+        <div className="font-black tracking-tight text-slate-800">{t('common.appName')}</div>
+        <div className={clsx('text-[11px] font-semibold', side ? 'text-brand-700' : 'hidden text-slate-500 sm:block')}>{t('admin.console')}</div>
       </div>
     </div>
   )
@@ -193,32 +193,32 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const iconBtn = 'inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100'
 
   return (
-    <div className="adm-root flex h-full min-h-0 bg-slate-50">
+    <div className="adm-root flex h-full min-h-0">
       {/* sidebar (desktop) */}
-      <aside className="adm-side-scroll sticky top-0 hidden h-dvh w-[260px] shrink-0 flex-col overflow-y-auto bg-[var(--adm-side)] px-3 py-4 lg:flex">
-        <div className="px-2 pb-5"><Logo dark /></div>
+      <aside className="adm-side adm-side-scroll sticky top-0 z-[31] hidden h-dvh w-[260px] shrink-0 flex-col overflow-y-auto px-3 py-4 lg:flex">
+        <div className="px-2 pb-5"><Logo side /></div>
         <NavList />
         <div className="flex-1" />
-        <div className="mt-6 space-y-1 border-t border-white/10 pt-4">
+        <div className="mt-6 space-y-1 border-t border-slate-200/80 pt-4">
           <button type="button" onClick={() => nav('/map')}
-            className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-white/65 hover:bg-white/5 hover:text-white">
+            className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-600 hover:bg-white hover:text-brand-700">
             <MapIcon className="size-4" /> {t('common.map')}
           </button>
           <button type="button" onClick={() => nav('/dashboard')}
-            className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-white/65 hover:bg-white/5 hover:text-white">
+            className="flex min-h-10 w-full items-center gap-3 rounded-xl px-3 text-sm font-semibold text-slate-600 hover:bg-white hover:text-brand-700">
             <LayoutDashboard className="size-4" /> {t('common.dashboard')}
           </button>
-          <div className="mt-2 flex items-center gap-3 rounded-xl bg-white/5 p-2.5">
+          <div className="mt-2 flex items-center gap-3 rounded-xl bg-white/90 p-2.5 shadow-[0_1px_2px_rgb(15_23_42/0.05)] ring-1 ring-slate-200/80">
             <span className="font-latin inline-flex size-9 items-center justify-center rounded-full bg-brand-700 text-xs font-black text-white">
               {name.slice(0, 1).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="text-[11px] text-white/45">{t('admin.signedInAs')}</div>
-              <div className="font-latin truncate text-sm font-semibold text-white">{name}</div>
+              <div className="text-[11px] text-slate-500">{t('admin.signedInAs')}</div>
+              <div className="font-latin truncate text-sm font-semibold text-slate-800">{name}</div>
             </div>
             <button type="button" aria-label={t('common.signOut')} title={t('common.signOut')}
               onClick={() => { void signOut().then(() => nav('/')) }}
-              className="inline-flex size-9 items-center justify-center rounded-lg text-white/60 hover:bg-white/10 hover:text-white">
+              className="inline-flex size-9 items-center justify-center rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600">
               <LogOut className="size-4" />
             </button>
           </div>

@@ -26,17 +26,18 @@ function Kpi({ icon: Icon, label, value, sub, tone, onClick, alert, format }: {
     <button type="button" onClick={onClick}
       className={clsx(
         'group relative flex min-w-0 flex-col gap-3 overflow-hidden rounded-2xl bg-white p-4 text-start shadow-[0_1px_2px_rgb(15_23_42/0.04)] ring-1 transition hover:-translate-y-0.5 hover:shadow-md motion-reduce:transition-none motion-reduce:hover:translate-y-0',
-        alert ? 'ring-red-200' : 'ring-slate-200/80',
+        alert ? 'ring-red-200' : 'ring-slate-200/70',
       )}>
-      <div className="flex items-center gap-2.5">
+      <span aria-hidden className="pointer-events-none absolute -end-10 -top-10 size-28 rounded-full opacity-80 blur-2xl transition-opacity group-hover:opacity-100 motion-reduce:transition-none" style={{ background: `${tone}1c` }} />
+      <div className="relative flex items-center gap-2.5">
         <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl" style={{ background: `${tone}14`, color: tone }}>
           <Icon className="size-[18px]" />
         </span>
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-600">{label}</span>
         {alert && <span className="adm-live-dot text-red-500" />}
       </div>
-      <div>
-        <AnimatedNumber value={value} format={format} className="block text-[28px] font-black leading-none tracking-tight text-slate-900" />
+      <div className="relative">
+        <AnimatedNumber value={value} format={format} className="block text-[28px] font-black leading-none tracking-tight text-slate-800" />
         {sub && <div className="mt-1.5 truncate text-xs text-slate-500">{sub}</div>}
       </div>
     </button>
@@ -50,7 +51,7 @@ function KpiGrid({ o }: { o: AdminOverview }) {
   const openAlerts = o.assignments.by_status.alerted + o.assignments.by_status.claimed + o.assignments.by_status.in_progress
   const tiles: { key: string; icon: LucideIcon; label: string; value: number; sub: string; tone: string; to: Section; alert?: boolean }[] = [
     { key: 'r', icon: FileText, label: t('admin.kpi_reports'), value: o.reports.total, sub: t('admin.kpi_reportsSub', { n: o.reports.today }), tone: '#0F766E', to: 'reports' },
-    { key: 'o', icon: MapPin, label: t('admin.kpi_open'), value: o.clusters.open, sub: t('admin.kpi_openSub', { n: o.clusters.total }), tone: '#1D4ED8', to: 'map' },
+    { key: 'o', icon: MapPin, label: t('admin.kpi_open'), value: o.clusters.open, sub: t('admin.kpi_openSub', { n: o.clusters.total }), tone: '#2563EB', to: 'map' },
     { key: 'a', icon: BellRing, label: t('admin.kpi_alerts'), value: openAlerts, sub: t('admin.kpi_alertsSub', { n: o.assignments.by_status.resolved }), tone: '#DC2626', to: 'assignments' },
     { key: 's', icon: Siren, label: t('admin.kpi_sos'), value: o.sos.total, sub: t('admin.kpi_sosSub', { n: o.sos.active }), tone: '#7C3AED', to: 'sos', alert: o.sos.active > 0 },
     { key: 'u', icon: Users, label: t('admin.kpi_users'), value: o.users.total, sub: t('admin.kpi_usersSub', { n: o.users.active_today }), tone: '#0891B2', to: 'users' },
@@ -91,7 +92,7 @@ function CategoryBreakdown({ o }: { o: AdminOverview }) {
             <CategoryIcon category={c as Category} size={26} />
             <span className="w-16 shrink-0 truncate text-sm font-semibold text-slate-700">{lang === 'ur' ? CATEGORY_META[c].ur : CATEGORY_META[c].en}</span>
             <Bar pct={(n / max) * 100} color={CATEGORY_META[c].color} delay={i * 0.04} />
-            <span className="font-latin w-7 text-end text-sm font-bold tabular-nums text-slate-900">{n}</span>
+            <span className="font-latin w-7 text-end text-sm font-bold tabular-nums text-slate-800">{n}</span>
           </li>
         ))}
       </ul>
@@ -121,7 +122,7 @@ function StatusBreakdown({ o }: { o: AdminOverview }) {
               <span className="inline-flex size-7 items-center justify-center rounded-lg" style={{ background: m.soft, color: m.color }}><Icon className="size-4" /></span>
               <span className="flex-1 font-semibold text-slate-700">{lang === 'ur' ? m.ur : m.en}</span>
               <span className="font-latin text-xs tabular-nums text-slate-400">{total ? Math.round((n / total) * 100) : 0}%</span>
-              <span className="font-latin w-7 text-end font-bold tabular-nums text-slate-900">{n}</span>
+              <span className="font-latin w-7 text-end font-bold tabular-nums text-slate-800">{n}</span>
             </li>
           )
         })}
@@ -135,7 +136,7 @@ function ResponseTimes({ o }: { o: AdminOverview }) {
   const r = o.response
   const tiles = [
     { label: t('admin.resp_reportToClaim'), v: r.avg_min_report_to_claim, n: r.claimed_count, icon: Timer, color: '#B45309' },
-    { label: t('admin.resp_alertToClaim'), v: r.avg_min_alert_to_claim, n: r.claimed_count, icon: Hand, color: '#1D4ED8' },
+    { label: t('admin.resp_alertToClaim'), v: r.avg_min_alert_to_claim, n: r.claimed_count, icon: Hand, color: '#2563EB' },
     { label: t('admin.resp_claimToResolve'), v: r.avg_min_claim_to_resolve, n: r.resolved_count, icon: CheckCheck, color: '#047857' },
   ]
   const conf = Math.round((o.reports.avg_confidence ?? 0) * 100)
@@ -146,17 +147,17 @@ function ResponseTimes({ o }: { o: AdminOverview }) {
           const Icon = x.icon
           const val = fmtMinutes(t, x.v)
           return (
-            <div key={x.label} className="rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100">
+            <div key={x.label} className="rounded-xl bg-gradient-to-b from-white to-slate-50 p-3 ring-1 ring-slate-200/70">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500"><Icon className="size-3.5" style={{ color: x.color }} /> {x.label}</div>
-              <div className="font-latin mt-1.5 text-xl font-black tracking-tight text-slate-900">{val ?? '—'}</div>
+              <div className="font-latin mt-1.5 text-xl font-black tracking-tight text-slate-800">{val ?? '—'}</div>
               <div className="text-[11px] text-slate-400">{val ? t('admin.resp_basis', { n: x.n }) : t('admin.resp_none')}</div>
             </div>
           )
         })}
-        <div className="rounded-xl bg-violet-50/60 p-3 ring-1 ring-violet-100">
+        <div className="rounded-xl bg-gradient-to-br from-white via-brand-50 to-amber-50 p-3 ring-1 ring-brand-100">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">{t('admin.avgConfidence')}</div>
           <div className="mt-1.5 flex items-baseline gap-2">
-            <AnimatedNumber value={conf} format={(n) => `${n}%`} className="text-xl font-black tracking-tight text-slate-900" />
+            <AnimatedNumber value={conf} format={(n) => `${n}%`} className="text-xl font-black tracking-tight text-slate-800" />
           </div>
           <AiLabel className="mt-1" />
         </div>
@@ -177,7 +178,7 @@ function Hotspots({ o }: { o: AdminOverview }) {
               <span className="font-latin inline-flex size-6 shrink-0 items-center justify-center rounded-md bg-slate-100 text-xs font-bold text-slate-500">{i + 1}</span>
               <span dir="auto" className="font-latin w-0 flex-[1.4] truncate font-semibold text-slate-700" title={a.area}>{a.area}</span>
               <Bar pct={(a.count / max) * 100} color="#0d9488" delay={i * 0.04} />
-              <span className="font-latin w-6 text-end font-bold tabular-nums text-slate-900">{a.count}</span>
+              <span className="font-latin w-6 text-end font-bold tabular-nums text-slate-800">{a.count}</span>
             </li>
           ))}
         </ol>
@@ -190,9 +191,9 @@ function People({ o }: { o: AdminOverview }) {
   const { t } = useI18n()
   const max = Math.max(1, ...ROLES.map((r) => o.users.by_role[r] ?? 0))
   const inputs = [
-    { k: 'voice', n: o.reports.voice, icon: Mic },
-    { k: 'photo', n: o.reports.photo, icon: Camera },
-    { k: 'text', n: o.reports.text, icon: MessageSquareText },
+    { k: 'voice', n: o.reports.voice, icon: Mic, color: '#B45309', bar: '#F59E0B', tile: 'from-white to-amber-50 ring-amber-100' },
+    { k: 'photo', n: o.reports.photo, icon: Camera, color: '#0F766E', bar: '#0D9488', tile: 'from-white to-brand-50 ring-brand-100' },
+    { k: 'text', n: o.reports.text, icon: MessageSquareText, color: '#475569', bar: '#64748B', tile: 'from-white to-slate-50 ring-slate-200/70' },
   ]
   const imax = Math.max(1, ...inputs.map((i) => i.n))
   return (
@@ -207,7 +208,7 @@ function People({ o }: { o: AdminOverview }) {
               <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg" style={{ background: m.soft, color: m.color }}><Icon className="size-4" /></span>
               <span className="w-20 shrink-0 truncate font-semibold text-slate-700">{t(`auth.role_${r}`)}</span>
               <Bar pct={(n / max) * 100} color={m.color} />
-              <span className="font-latin w-6 text-end font-bold tabular-nums">{n}</span>
+              <span className="font-latin w-6 text-end font-bold tabular-nums text-slate-800">{n}</span>
             </li>
           )
         })}
@@ -215,12 +216,12 @@ function People({ o }: { o: AdminOverview }) {
       <div className="mt-4 border-t border-slate-100 pt-3">
         <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">{t('admin.inputs')}</div>
         <div className="grid grid-cols-3 gap-2">
-          {inputs.map(({ k, n, icon: Icon }) => (
-            <div key={k} className="rounded-xl bg-slate-50 p-2.5 text-center ring-1 ring-slate-100">
-              <Icon className="mx-auto size-4 text-brand-700" />
-              <div className="font-latin mt-1 text-lg font-black tabular-nums">{n}</div>
+          {inputs.map(({ k, n, icon: Icon, color, bar, tile }) => (
+            <div key={k} className={clsx('rounded-xl bg-gradient-to-b p-2.5 text-center ring-1', tile)}>
+              <Icon className="mx-auto size-4" style={{ color }} />
+              <div className="font-latin mt-1 text-lg font-black tabular-nums text-slate-800">{n}</div>
               <div className="text-[11px] font-semibold text-slate-500">{t(`admin.input_${k}`)}</div>
-              <div className="mx-auto mt-1 h-1 w-full overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-brand-600" style={{ width: `${(n / imax) * 100}%` }} /></div>
+              <div className="mx-auto mt-1 h-1 w-full overflow-hidden rounded-full bg-slate-200/80"><div className="h-full rounded-full" style={{ width: `${(n / imax) * 100}%`, background: bar }} /></div>
             </div>
           ))}
         </div>
@@ -279,7 +280,7 @@ function ActivityFeed() {
                     initial={reduce ? false : { opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                     transition={{ duration: 0.25 }}>
                     <button type="button" onClick={() => open(a)}
-                      className={clsx('flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-start hover:bg-slate-50',
+                      className={clsx('flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-start hover:bg-brand-50/60',
                         (changed.has(a.ref_id) || (a.cluster_id && changed.has(a.cluster_id))) && 'adm-flash')}>
                       {a.kind === 'report' && a.category && a.category in CATEGORY_META ? (
                         <CategoryIcon category={a.category as Category} size={32} />
@@ -290,7 +291,7 @@ function ActivityFeed() {
                         </span>
                       )}
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-semibold text-slate-900">{title || label(a)}</span>
+                        <span className="block truncate text-sm font-semibold text-slate-800">{title || label(a)}</span>
                         <span className="flex items-center gap-1.5 text-xs text-slate-500">
                           <span className="truncate">{label(a)}</span>
                           {a.is_private && <Lock className="size-3 shrink-0 text-violet-600" aria-label={t('admin.private')} />}

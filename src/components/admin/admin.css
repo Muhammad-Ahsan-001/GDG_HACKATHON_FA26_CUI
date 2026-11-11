@@ -1,11 +1,30 @@
 /* Admin operations console. Layout is Tailwind; this file only holds what utilities can't express nicely. */
 .adm-root {
-  --adm-side: #0b1f1d;
-  --adm-side-2: #10302c;
   --adm-line: rgb(226 232 240 / 0.9);
   --adm-ink-2: #475569;
   --adm-ink-3: #64748b;
+  /* light canvas: slate-50 with a whisper of teal (top-end) and warm cream (top-start) */
+  background:
+    radial-gradient(1100px 420px at 100% -8%, rgb(204 251 241 / 0.55), transparent 62%),
+    radial-gradient(900px 380px at 0% -6%, rgb(254 243 199 / 0.45), transparent 60%),
+    #f8fafc;
 }
+:root[dir="rtl"] .adm-root {
+  background:
+    radial-gradient(1100px 420px at 0% -8%, rgb(204 251 241 / 0.55), transparent 62%),
+    radial-gradient(900px 380px at 100% -6%, rgb(254 243 199 / 0.45), transparent 60%),
+    #f8fafc;
+}
+
+/* light sidebar: white melting into teal-50, with a warm cream foot */
+.adm-side {
+  background: linear-gradient(180deg, #ffffff 0%, #f7fefc 38%, #f0fdfa 78%, #fffbeb 100%);
+  box-shadow: 1px 0 0 rgb(226 232 240 / 0.9), 8px 0 32px -24px rgb(15 118 110 / 0.25);
+}
+:root[dir="rtl"] .adm-side { box-shadow: -1px 0 0 rgb(226 232 240 / 0.9), -8px 0 32px -24px rgb(15 118 110 / 0.25); }
+
+/* active nav pill: teal with a soft glow */
+.adm-pill { box-shadow: 0 1px 0 rgb(255 255 255 / 0.25) inset, 0 8px 18px -8px rgb(15 118 110 / 0.55); }
 
 /* skeleton shimmer (static when reduced motion is preferred) */
 .adm-skel {
@@ -31,7 +50,7 @@
 .adm-scroll { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
 .adm-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .adm-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
-.adm-side-scroll { scrollbar-width: thin; scrollbar-color: rgb(255 255 255 / .15) transparent; }
+.adm-side-scroll { scrollbar-width: thin; scrollbar-color: rgb(15 118 110 / .22) transparent; }
 
 /* range input: trust slider */
 .adm-range { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 9999px; background: linear-gradient(to right, var(--fill) 0 var(--p), #e2e8f0 var(--p) 100%); outline: none; }

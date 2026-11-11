@@ -126,12 +126,12 @@ export default function UsersPanel() {
                     {rows.map((u) => {
                       const m = ROLE_META[u.role]
                       return (
-                        <tr key={u.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                        <tr key={u.id} className="border-t border-slate-100 hover:bg-brand-50/40">
                           <td className="max-w-[300px] px-4 py-2.5">
                             <div className="flex items-center gap-3">
                               <Avatar name={u.display_name} color={m.color} soft={m.soft} icon={m.icon} />
                               <div className="min-w-0">
-                                <div className="flex items-center gap-1.5 font-semibold text-slate-900"><span className="truncate">{name(u)}</span>{badges(u)}</div>
+                                <div className="flex items-center gap-1.5 font-semibold text-slate-800"><span className="truncate">{name(u)}</span>{badges(u)}</div>
                                 <div dir="ltr" className="font-latin truncate text-start text-xs text-slate-500">{contact(u)}</div>
                               </div>
                             </div>
@@ -139,7 +139,7 @@ export default function UsersPanel() {
                           <td className="px-3 py-2.5">{roleSelect(u)}</td>
                           <td className="px-3 py-2.5"><TrustSlider u={u} onSaved={(v) => patch(u.id, { trust_score: v })} /></td>
                           <td className="px-3 py-2.5">
-                            <span className="font-latin font-bold tabular-nums text-slate-900">{u.report_count}</span>
+                            <span className="font-latin font-bold tabular-nums text-slate-800">{u.report_count}</span>
                             {u.spam_count > 0 && <span className="ms-1.5 text-xs text-red-600">{t('admin.nSpam', { n: u.spam_count })}</span>}
                             {u.sos_count > 0 && <span className="ms-1.5 inline-flex items-center gap-0.5 text-xs text-violet-700"><Siren className="size-3" />{u.sos_count}</span>}
                           </td>
@@ -165,7 +165,7 @@ export default function UsersPanel() {
                       <div className="flex items-center gap-3">
                         <Avatar name={u.display_name} color={m.color} soft={m.soft} icon={m.icon} size={40} />
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 font-semibold text-slate-900"><span className="truncate">{name(u)}</span>{badges(u)}</div>
+                          <div className="flex items-center gap-1.5 font-semibold text-slate-800"><span className="truncate">{name(u)}</span>{badges(u)}</div>
                           <div dir="ltr" className="font-latin truncate text-start text-xs text-slate-500">{contact(u)}</div>
                         </div>
                         {roleSelect(u)}

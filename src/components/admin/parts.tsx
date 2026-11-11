@@ -9,12 +9,12 @@ export function Card({ title, icon: Icon, action, children, className, bodyClass
   title?: ReactNode; icon?: LucideIcon; action?: ReactNode; children: ReactNode; className?: string; bodyClass?: string; sub?: ReactNode
 }) {
   return (
-    <section className={clsx('min-w-0 rounded-2xl bg-white shadow-[0_1px_2px_rgb(15_23_42/0.04)] ring-1 ring-slate-200/80', className)}>
+    <section className={clsx('min-w-0 rounded-2xl bg-white shadow-[0_1px_2px_rgb(15_23_42/0.04),0_10px_28px_-18px_rgb(15_118_110/0.18)] ring-1 ring-slate-200/70', className)}>
       {(title || action) && (
         <header className="flex items-center gap-2 px-4 pb-1 pt-3.5">
-          {Icon && <Icon className="size-4.5 shrink-0 text-slate-400" />}
+          {Icon && <Icon className="size-4.5 shrink-0 text-brand-600" />}
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-[15px] font-bold text-slate-900">{title}</h2>
+            <h2 className="truncate text-[15px] font-bold text-slate-800">{title}</h2>
             {sub && <div className="truncate text-xs text-slate-500">{sub}</div>}
           </div>
           {action}
@@ -29,11 +29,11 @@ export function PanelHeader({ title, sub, icon: Icon, actions }: { title: string
   return (
     <div className="mb-4 flex flex-wrap items-end gap-3">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <span className="hidden size-11 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 ring-1 ring-brand-100 sm:inline-flex">
+        <span className="hidden size-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-white via-brand-50 to-brand-100 text-brand-700 shadow-[0_6px_16px_-10px_rgb(15_118_110/0.5)] ring-1 ring-brand-100 sm:inline-flex">
           <Icon className="size-5.5" />
         </span>
         <div className="min-w-0">
-          <h1 className="truncate text-xl font-black tracking-tight text-slate-900 sm:text-2xl">{title}</h1>
+          <h1 className="truncate text-xl font-black tracking-tight text-slate-800 sm:text-2xl">{title}</h1>
           {sub && <p className="text-sm text-slate-500">{sub}</p>}
         </div>
       </div>
@@ -76,11 +76,11 @@ export function ErrorState({ error, onRetry, compact }: { error: unknown; onRetr
   return (
     <div role="alert" className={clsx('flex flex-col items-center gap-2 text-center', compact ? 'p-4' : 'p-10')}>
       <span className="inline-flex size-12 items-center justify-center rounded-2xl bg-red-50 text-red-600 ring-1 ring-red-100"><Icon className="size-6" /></span>
-      <div className="font-bold text-slate-900">{forbidden ? t('admin.errorForbidden') : t('admin.errorTitle')}</div>
+      <div className="font-bold text-slate-800">{forbidden ? t('admin.errorForbidden') : t('admin.errorTitle')}</div>
       {!forbidden && msg && <div dir="ltr" className="font-latin max-w-md break-words text-xs text-slate-500">{msg}</div>}
       {onRetry && (
         <button type="button" onClick={onRetry}
-          className="mt-1 inline-flex min-h-10 items-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800">
+          className="mt-1 inline-flex min-h-10 items-center gap-2 rounded-xl bg-brand-700 px-4 text-sm font-semibold text-white shadow-sm hover:bg-brand-900">
           <RefreshCw className="size-4" /> {t('common.retry')}
         </button>
       )}
@@ -134,7 +134,7 @@ export function Chip({ active, onClick, icon: Icon, color, count, children, clas
       aria-pressed={active}
       className={clsx(
         'inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-sm font-semibold ring-1 transition',
-        active ? 'bg-slate-900 text-white ring-slate-900' : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50',
+        active ? 'bg-brand-700 text-white ring-brand-700 shadow-[0_6px_14px_-8px_rgb(15_118_110/0.6)]' : 'bg-white text-slate-700 ring-slate-200 hover:bg-brand-50/60 hover:ring-brand-100',
         className,
       )}
     >
@@ -247,7 +247,7 @@ export function Drawer({ open, onClose, title, children, header }: {
           <motion.button
             type="button"
             aria-label={t('common.close')}
-            className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px]"
+            className="absolute inset-0 bg-slate-500/25 backdrop-blur-[3px]"
             onClick={onClose}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: reduce ? 0 : 0.18 }}
@@ -260,7 +260,7 @@ export function Drawer({ open, onClose, title, children, header }: {
             transition={{ type: 'tween', ease: [0.22, 1, 0.36, 1], duration: reduce ? 0 : 0.28 }}
           >
             <div className="flex items-start gap-3 border-b border-slate-100 px-5 pb-3 pt-4">
-              <div className="min-w-0 flex-1">{header ?? <div className="text-lg font-bold">{title}</div>}</div>
+              <div className="min-w-0 flex-1">{header ?? <div className="text-lg font-bold text-slate-800">{title}</div>}</div>
               <button type="button" aria-label={t('common.close')} onClick={onClose}
                 className="-me-2 inline-flex size-10 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100">
                 <X className="size-5" />

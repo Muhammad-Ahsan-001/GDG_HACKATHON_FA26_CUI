@@ -101,7 +101,7 @@ export default function ReportsPanel() {
         {loading ? <div className="p-4"><SkeletonRows rows={8} /></div> : error ? <ErrorState error={error} onRetry={reload} /> :
           rows.length === 0 ? (
             <Empty icon={SearchX} title={t('admin.rep_empty')} hint={t('admin.rep_emptyHint')}>
-              {search && <button type="button" onClick={() => setSearch('')} className="mt-1 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white">{t('admin.clearSearch')}</button>}
+              {search && <button type="button" onClick={() => setSearch('')} className="mt-1 rounded-xl bg-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-900">{t('admin.clearSearch')}</button>}
             </Empty>
           ) : (
             <>
@@ -121,13 +121,13 @@ export default function ReportsPanel() {
                   <tbody>
                     {rows.map((r) => (
                       <tr key={r.id} onClick={() => setOpenId(r.id)}
-                        className={clsx('cursor-pointer border-t border-slate-100 align-middle transition hover:bg-slate-50/80',
+                        className={clsx('cursor-pointer border-t border-slate-100 align-middle transition hover:bg-brand-50/50',
                           r.is_spam && 'bg-slate-50/60 text-slate-400', (changed.has(r.id) || (r.cluster_id && changed.has(r.cluster_id))) && 'adm-flash')}>
                         <td className="max-w-[380px] px-4 py-2.5">
                           <div className="flex items-center gap-3">
                             <CategoryIcon category={r.category} size={34} className={r.is_spam ? 'opacity-40' : undefined} />
                             <div className="min-w-0">
-                              <div className={clsx('flex items-center gap-1.5 truncate font-semibold', r.is_spam ? 'text-slate-400 line-through' : 'text-slate-900')}>
+                              <div className={clsx('flex items-center gap-1.5 truncate font-semibold', r.is_spam ? 'text-slate-400 line-through' : 'text-slate-800')}>
                                 {r.is_private && <Lock className="size-3.5 shrink-0 text-violet-600" aria-label={t('admin.private')} />}
                                 <span className="truncate">{pick(r.title_en, r.title_ur) || t('admin.untitled')}</span>
                               </div>
@@ -162,7 +162,7 @@ export default function ReportsPanel() {
                     <button type="button" onClick={() => setOpenId(r.id)} className="flex w-full items-start gap-3 px-4 py-3 text-start">
                       <CategoryIcon category={r.category} size={38} className={r.is_spam ? 'opacity-40' : undefined} />
                       <div className="min-w-0 flex-1">
-                        <div className={clsx('font-semibold leading-snug', r.is_spam ? 'text-slate-400 line-through' : 'text-slate-900')}>
+                        <div className={clsx('font-semibold leading-snug', r.is_spam ? 'text-slate-400 line-through' : 'text-slate-800')}>
                           {r.is_private && <Lock className="me-1 inline size-3.5 text-violet-600" />}
                           {pick(r.title_en, r.title_ur) || t('admin.untitled')}
                         </div>
@@ -170,7 +170,7 @@ export default function ReportsPanel() {
                         <div className="mt-1.5 flex flex-wrap items-center gap-2">
                           <StatusBadge status={r.cluster_status ?? r.status} className="!px-2 !py-0.5 !text-xs" />
                           <Confidence value={r.confidence} />
-                          {r.is_spam && <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[11px] font-bold text-white"><ShieldBan className="size-3" />{t('admin.spam')}</span>}
+                          {r.is_spam && <span className="inline-flex items-center gap-1 rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 ring-1 ring-slate-300/70"><ShieldBan className="size-3" />{t('admin.spam')}</span>}
                         </div>
                       </div>
                     </button>

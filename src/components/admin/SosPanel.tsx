@@ -59,7 +59,7 @@ function Chunk({ c }: { c: AdminSos['chunks'][number] }) {
     try { setUrl(await adminApi.signedAudio(c.audio_path)); setSt('idle') } catch { setSt('error') }
   }
   return (
-    <li className="rounded-xl bg-slate-50 p-2.5 ring-1 ring-slate-100">
+    <li className="rounded-xl bg-gradient-to-b from-white to-red-50/40 p-2.5 ring-1 ring-red-100/80">
       <div className="flex items-center gap-2">
         <span className="font-latin inline-flex size-6 items-center justify-center rounded-md bg-white text-[11px] font-bold text-slate-500 ring-1 ring-slate-200">{c.seq + 1}</span>
         <span className="font-latin text-xs text-slate-500">{fmtTime(c.created_at)}</span>
@@ -67,7 +67,7 @@ function Chunk({ c }: { c: AdminSos['chunks'][number] }) {
         <span className="flex-1" />
         {c.audio_path && !url && (
           <button type="button" onClick={() => { void load() }} disabled={st === 'loading'} aria-label={t('admin.d_audioLoad', { n: c.seq + 1 })}
-            className="inline-flex size-8 items-center justify-center rounded-full bg-slate-900 text-white hover:bg-slate-700">
+            className="inline-flex size-8 items-center justify-center rounded-full bg-red-600 text-white shadow-sm hover:bg-red-700">
             {st === 'loading' ? <Spinner className="size-4" /> : <Play className="size-3.5" />}
           </button>
         )}
@@ -104,7 +104,7 @@ function Detail({ s }: { s: AdminSos }) {
 
       <Block title={t('admin.d_reporter')} icon={User}>
         <div className="rounded-2xl bg-white p-3 ring-1 ring-slate-200">
-          <div className="font-semibold text-slate-900">{s.user_name || (s.user_anonymous ? t('admin.anonymous') : t('admin.unnamed'))}</div>
+          <div className="font-semibold text-slate-800">{s.user_name || (s.user_anonymous ? t('admin.anonymous') : t('admin.unnamed'))}</div>
           <div dir="ltr" className="font-latin text-start text-xs text-slate-500">{[s.user_email, s.user_phone].filter(Boolean).join(' · ') || s.user_id.slice(0, 8)}</div>
           <div className="mt-1 text-xs text-slate-500">{t('admin.trigger', { t: t(`admin.trig_${s.trigger}`) })}</div>
         </div>
@@ -137,9 +137,9 @@ function Detail({ s }: { s: AdminSos }) {
           <ul className="space-y-2">
             {s.police.map((p) => (
               <li key={p.org_id} className="flex items-center gap-3 rounded-xl bg-white p-2.5 ring-1 ring-slate-200">
-                <span className="inline-flex size-9 items-center justify-center rounded-lg bg-violet-600 text-white"><Shield className="size-4.5" /></span>
+                <span className="inline-flex size-9 items-center justify-center rounded-lg bg-red-50 text-red-600 ring-1 ring-red-100"><Shield className="size-4.5" /></span>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-semibold">{p.org_name}</div>
+                  <div className="truncate text-sm font-semibold text-slate-800">{p.org_name}</div>
                   <div className="font-latin text-xs text-slate-500">{typeof p.distance_m === 'number' ? `${(p.distance_m / 1000).toFixed(1)} km · ` : ''}{fmtTime(p.alerted_at)}</div>
                 </div>
                 <Badge color={ASSIGNMENT_META[p.status].color} soft="#F8FAFC">{lang === 'ur' ? ASSIGNMENT_META[p.status].ur : ASSIGNMENT_META[p.status].en}</Badge>
@@ -186,16 +186,16 @@ function HowItWorks() {
   ]
   return (
     <div className="mx-auto flex max-w-xl flex-col items-center px-4 py-10 text-center">
-      <span className="relative inline-flex size-16 items-center justify-center rounded-3xl bg-violet-50 text-violet-600 ring-1 ring-violet-100">
+      <span className="relative inline-flex size-16 items-center justify-center rounded-3xl bg-gradient-to-br from-white via-red-50 to-rose-100 text-red-600 shadow-[0_10px_24px_-14px_rgb(220_38_38/0.55)] ring-1 ring-red-100">
         <Siren className="size-8" />
       </span>
-      <div className="mt-4 text-lg font-bold text-slate-900">{t('admin.sos_empty')}</div>
+      <div className="mt-4 text-lg font-bold text-slate-800">{t('admin.sos_empty')}</div>
       <p className="mt-1 text-sm text-slate-500">{t('admin.sos_emptyHint')}</p>
       <ol className="mt-6 grid w-full gap-2 sm:grid-cols-4">
         {steps.map(({ icon: I, label }, i) => (
-          <li key={i} className="flex flex-col items-center gap-1.5 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
-            <span className="font-latin text-[11px] font-bold text-slate-400">{i + 1}</span>
-            <I className="size-5 text-violet-600" />
+          <li key={i} className="flex flex-col items-center gap-1.5 rounded-2xl bg-gradient-to-b from-white to-red-50/50 p-3 ring-1 ring-red-100/80">
+            <span className="font-latin text-[11px] font-bold text-red-500">{i + 1}</span>
+            <I className="size-5 text-red-600" />
             <span className="text-xs font-semibold text-slate-700">{label}</span>
           </li>
         ))}
@@ -228,7 +228,7 @@ export default function SosPanel() {
                   return (
                     <li key={s.id}>
                       <button type="button" onClick={() => setSel(s.id)}
-                        className={clsx('w-full rounded-xl p-3 text-start transition', sel === s.id ? 'bg-violet-50 ring-2 ring-violet-400' : 'hover:bg-slate-50',
+                        className={clsx('w-full rounded-xl p-3 text-start transition', sel === s.id ? 'bg-red-50/80 ring-2 ring-red-300' : 'hover:bg-red-50/40',
                           changed.has(s.id) && 'adm-flash')}>
                         <div className="flex items-center gap-2">
                           <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl"
@@ -236,7 +236,7 @@ export default function SosPanel() {
                             {(() => { const I = SOS_ST[s.status]?.icon ?? Siren; return <I className="size-4.5" /> })()}
                           </span>
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-semibold text-slate-900">{s.user_name || (s.user_anonymous ? t('admin.anonymous') : t('admin.unnamed'))}</div>
+                            <div className="truncate text-sm font-semibold text-slate-800">{s.user_name || (s.user_anonymous ? t('admin.anonymous') : t('admin.unnamed'))}</div>
                             <div className="text-xs text-slate-500">{ago(s.started_at)} · <span className="font-latin">{fmtDuration(s.started_at, s.ended_at)}</span></div>
                           </div>
                           {active && <span className="adm-live-dot text-red-500" />}

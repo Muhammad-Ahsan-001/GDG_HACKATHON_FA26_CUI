@@ -39,7 +39,7 @@ function OrgRow({ o, owner, selected, onSelect, busy, actions }: {
         <div className="flex items-start gap-3">
           <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl text-white" style={{ background: m?.color ?? '#475569' }}><Icon className="size-5" /></span>
           <div className="min-w-0 flex-1">
-            <div className="font-bold leading-snug text-slate-900">{o.name}</div>
+            <div className="font-bold leading-snug text-slate-800">{o.name}</div>
             <div className="text-xs text-slate-500">
               {t(`auth.orgType_${o.org_type}`)}
               {o.radius_m ? <> · {t('admin.radiusKm', { n: Math.round(o.radius_m / 100) / 10 })}</> : null}

@@ -10,7 +10,7 @@ import { Card, Chip, Empty, ErrorState, Pager, PanelHeader, SkeletonRows } from 
 
 const TYPE_META: Record<string, { icon: LucideIcon; color: string }> = {
   new_assignment: { icon: BellRing, color: '#DC2626' },
-  status_change: { icon: RefreshCcw, color: '#1D4ED8' },
+  status_change: { icon: RefreshCcw, color: '#2563EB' },
   nearby_alert: { icon: Bell, color: '#EA580C' },
   food_alert: { icon: Utensils, color: '#16A34A' },
   verified: { icon: CheckCheck, color: '#15803D' },
@@ -55,7 +55,7 @@ export default function NotificationsPanel() {
                       <span className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-xl" style={{ background: `${m.color}14`, color: m.color }}><I className="size-4.5" /></span>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                          <span className="font-semibold text-slate-900">{pick(n.title_en, n.title_ur) || typeLabel(n.type)}</span>
+                          <span className="font-semibold text-slate-800">{pick(n.title_en, n.title_ur) || typeLabel(n.type)}</span>
                           <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: `${m.color}14`, color: m.color }}>{typeLabel(n.type)}</span>
                         </div>
                         {pick(n.body_en, n.body_ur) && <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">{pick(n.body_en, n.body_ur)}</p>}

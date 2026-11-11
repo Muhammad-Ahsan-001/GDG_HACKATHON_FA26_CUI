@@ -150,9 +150,11 @@ export default function Admin() {
             <motion.div key={toastMsg.id}
               initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8 }}
               transition={{ duration: 0.2 }}
-              className={clsx('pointer-events-auto flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold text-white shadow-xl',
-                toastMsg.tone === 'ok' ? 'bg-slate-900' : 'bg-red-600')}>
-              {toastMsg.tone === 'ok' ? <CircleCheck className="size-5 text-emerald-400" /> : <CircleAlert className="size-5" />}
+              className={clsx('pointer-events-auto flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold ring-1 backdrop-blur-md',
+                toastMsg.tone === 'ok'
+                  ? 'bg-white/95 text-slate-800 ring-brand-100 shadow-[0_14px_36px_-12px_rgb(15_118_110/0.35)]'
+                  : 'bg-red-50/95 text-red-800 ring-red-200 shadow-[0_14px_36px_-12px_rgb(220_38_38/0.35)]')}>
+              {toastMsg.tone === 'ok' ? <CircleCheck className="size-5 shrink-0 text-emerald-600" /> : <CircleAlert className="size-5 shrink-0 text-red-600" />}
               {toastMsg.msg}
             </motion.div>
           )}

@@ -52,7 +52,7 @@ function PinCard({ c, onClose }: { c: AdminCluster; onClose: () => void }) {
         <div className="flex items-start gap-3">
           <CategoryIcon category={c.category} size={40} />
           <div className="min-w-0 flex-1">
-            <div className="font-bold leading-snug text-slate-900">{pick(c.title_en, c.title_ur) || (lang === 'ur' ? CATEGORY_META[c.category].ur : CATEGORY_META[c.category].en)}</div>
+            <div className="font-bold leading-snug text-slate-800">{pick(c.title_en, c.title_ur) || (lang === 'ur' ? CATEGORY_META[c.category].ur : CATEGORY_META[c.category].en)}</div>
             <div className="mt-0.5 text-xs text-slate-500">{ago(c.last_report_at || c.created_at)}</div>
           </div>
           <button type="button" onClick={onClose} aria-label={t('common.close')} className="-me-1.5 -mt-1 inline-flex size-9 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100"><X className="size-5" /></button>
@@ -81,7 +81,7 @@ function PinCard({ c, onClose }: { c: AdminCluster; onClose: () => void }) {
           </Select>
         </label>
         <button type="button" onClick={() => go('reports', { search: c.id })}
-          className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 text-sm font-semibold text-white hover:bg-slate-800">
+          className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl bg-brand-700 text-sm font-semibold text-white shadow-sm hover:bg-brand-900">
           <FileText className="size-4" /> {t('admin.map_viewReports')}
         </button>
       </div>
@@ -134,7 +134,7 @@ export default function LiveMapPanel() {
               <Lock className="size-3.5 text-violet-600" /> {t('admin.map_private')}
               <span className="font-latin rounded-full bg-slate-100 px-1.5 text-[11px] tabular-nums text-slate-600">{privateCount}</span>
             </label>
-            <span className="font-latin rounded-full bg-slate-900 px-3 py-1.5 text-sm font-bold text-white">{t('admin.map_count', { n: visible.length })}</span>
+            <span className="font-latin rounded-full bg-brand-50 px-3 py-1.5 text-sm font-bold text-brand-900 ring-1 ring-brand-100">{t('admin.map_count', { n: visible.length })}</span>
           </>
         } />
 
@@ -146,7 +146,7 @@ export default function LiveMapPanel() {
         })}
       </div>
 
-      <div className="relative h-[68dvh] min-h-[420px] overflow-hidden rounded-2xl bg-slate-100 ring-1 ring-slate-200 lg:h-[calc(100dvh-15rem)]">
+      <div className="relative h-[68dvh] min-h-[420px] overflow-hidden rounded-2xl bg-slate-100 shadow-[0_10px_28px_-18px_rgb(15_118_110/0.25)] ring-1 ring-slate-200 lg:h-[calc(100dvh-15rem)]">
         {loading ? <Skeleton className="absolute inset-0 rounded-none" /> : error ? (
           <div className="absolute inset-0 flex items-center justify-center bg-white"><ErrorState error={error} onRetry={reload} /></div>
         ) : (
@@ -158,11 +158,11 @@ export default function LiveMapPanel() {
         )}
         {!loading && !error && visible.length === 0 && (
           <div className="pointer-events-none absolute inset-x-0 top-4 z-[5] flex justify-center">
-            <span className="rounded-full bg-white/95 px-4 py-2 text-sm font-semibold text-slate-600 shadow">{t('admin.map_empty')}</span>
+            <span className="rounded-full bg-white/95 px-4 py-2 text-sm font-semibold text-slate-600 shadow ring-1 ring-slate-200/70 backdrop-blur">{t('admin.map_empty')}</span>
           </div>
         )}
         {/* legend */}
-        <div className="pointer-events-none absolute bottom-3 start-3 z-[5] hidden flex-wrap gap-1.5 rounded-xl bg-white/95 p-2 text-[11px] font-semibold shadow md:flex">
+        <div className="pointer-events-none absolute bottom-3 start-3 z-[5] hidden flex-wrap gap-1.5 rounded-xl bg-white/95 p-2 text-[11px] font-semibold shadow-md ring-1 ring-slate-200/70 backdrop-blur md:flex">
           {STATUSES.map((s) => {
             const m = STATUS_META[s]
             const Icon = m.icon

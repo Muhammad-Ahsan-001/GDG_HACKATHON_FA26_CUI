@@ -35,7 +35,7 @@ function AssignmentCard({ a, flash }: { a: AdminAssignment; flash: boolean }) {
         <div className="flex items-start gap-2.5">
           <CategoryIcon category={a.category} size={30} />
           <div className="min-w-0 flex-1">
-            <div className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900">
+            <div className="line-clamp-2 text-sm font-semibold leading-snug text-slate-800">
               {a.is_private && <Lock className="me-1 inline size-3.5 text-red-600" />}
               {pick(a.title_en, a.title_ur) || '—'}
             </div>
@@ -82,7 +82,7 @@ export default function AssignmentsPanel() {
             const m = ASSIGNMENT_META[s]
             const list = byStatus[s]
             return (
-              <section key={s} className="flex w-[82vw] max-w-[340px] shrink-0 snap-start flex-col rounded-2xl bg-slate-100/70 ring-1 ring-slate-200/70 lg:w-auto lg:max-w-none">
+              <section key={s} className="flex w-[82vw] max-w-[340px] shrink-0 snap-start flex-col rounded-2xl bg-gradient-to-b from-white/80 to-slate-100/70 ring-1 ring-slate-200/70 lg:w-auto lg:max-w-none">
                 <header className="flex items-center gap-2 px-3 pb-2 pt-3">
                   <span className="inline-flex size-7 items-center justify-center rounded-lg text-white" style={{ background: m.color }}><Icon className="size-4" /></span>
                   <h2 className="flex-1 text-sm font-bold text-slate-800">{lang === 'ur' ? m.ur : m.en}</h2>
