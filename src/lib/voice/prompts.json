@@ -1,0 +1,94 @@
+{
+  "welcome": {
+    "ur": "السلام علیکم! آواز میں خوش آمدید۔ اپنے محلے کا کوئی بھی مسئلہ بول کر بتائیں، ہم اسے صحیح ادارے تک پہنچائیں گے۔",
+    "en": "Welcome to Awaaz. Tell us about any problem in your area just by speaking, and we will alert the right people."
+  },
+  "chooseLanguage": {
+    "ur": "اپنی زبان چنیں۔ اردو کے لیے اردو والا بٹن دبائیں۔",
+    "en": "Choose your language. For English, press the English button."
+  },
+  "phone": {
+    "ur": "اپنا موبائل نمبر لکھیں، یا ڈیمو نمبر والا بٹن دبائیں۔ پھر آگے کا تیر دبائیں۔",
+    "en": "Type your mobile number, or press the demo number button. Then press the arrow to continue."
+  },
+  "sms": {
+    "ur": "ہم نے آپ کو ایک کوڈ بھیجا ہے۔ اوپر آنے والے پیغام کو دبائیں، کوڈ خود بھر جائے گا۔",
+    "en": "We have sent you a code. Tap the message at the top, and the code will fill in by itself."
+  },
+  "profileAsk": {
+    "ur": "اب مائیک دبائیں اور بتائیں، آپ کا نام کیا ہے اور آپ کس علاقے میں رہتے ہیں؟ مثلاً: میرا نام عائشہ ہے، اور میں جی نائن میں رہتی ہوں۔ بات ختم ہو تو مائیک دوبارہ دبائیں۔",
+    "en": "Now press the mic and tell us your name and the area you live in. For example: My name is Ayesha and I live in G-9. Press the mic again when you finish."
+  },
+  "profileConfirm": {
+    "ur": "کیا یہ معلومات درست ہیں؟ درست ہیں تو ہرا بٹن دبائیں، دوبارہ بتانے کے لیے لال بٹن دبائیں۔",
+    "en": "Are these details correct? Press the green button for yes, or the red button to try again."
+  },
+  "location": {
+    "ur": "اپنی جگہ کی اجازت دیں، تاکہ ہم آپ کے قریب کسی خطرے کی اطلاع دے سکیں اور آپ کی رپورٹ صحیح جگہ پر لگے۔",
+    "en": "Please allow location, so we can warn you about danger near you and put your reports in the right place."
+  },
+  "notifications": {
+    "ur": "اطلاعات کی اجازت دیں، تاکہ آپ کو اپنی رپورٹ پر ہونے والے کام کی خبر ملتی رہے۔",
+    "en": "Please allow notifications, so you hear back when someone works on your report."
+  },
+  "done": {
+    "ur": "شکریہ! آپ تیار ہیں۔ جب بھی کوئی مسئلہ ہو، بڑا مائیک دبائیں اور بولیں۔",
+    "en": "Thank you, you are all set! Whenever there is a problem, press the big mic and speak."
+  },
+  "mapIntro": {
+    "ur": "یہ آپ کے علاقے کا نقشہ ہے۔ ہر نشان ایک مسئلہ ہے۔ نیا مسئلہ بتانے کے لیے نیچے بڑا مائیک دبائیں۔",
+    "en": "This is the map of your area. Each pin is a problem. To report a new one, press the big mic at the bottom."
+  },
+  "reportVoice": {
+    "ur": "مائیک دبائیں اور بتائیں کیا مسئلہ ہے اور کہاں ہے۔ بات ختم ہو تو مائیک دوبارہ دبائیں۔",
+    "en": "Press the mic and say what the problem is and where it is. Press the mic again when you finish."
+  },
+  "reportPhoto": {
+    "ur": "کیمرہ دبائیں اور مسئلے کی تصویر لیں۔",
+    "en": "Press the camera and take a photo of the problem."
+  },
+  "reportReady": {
+    "ur": "اگر سب ٹھیک ہے تو بھیجنے والا بٹن دبائیں۔",
+    "en": "If everything looks right, press the send button."
+  },
+  "reportSending": {
+    "ur": "آپ کی رپورٹ بھیجی جا رہی ہے، ذرا انتظار کریں۔",
+    "en": "Sending your report, please wait a moment."
+  },
+  "reportDone": {
+    "ur": "شکریہ! آپ کی رپورٹ نقشے پر لگ گئی ہے، اور متعلقہ ادارے کو اطلاع دے دی گئی ہے۔",
+    "en": "Thank you! Your report is on the map, and the right people have been told."
+  },
+  "noSpeech": {
+    "ur": "معاف کیجیے، ہمیں آپ کی آواز سنائی نہیں دی۔ مائیک کے قریب ہو کر دوبارہ بولیں۔",
+    "en": "Sorry, we could not hear you. Please move closer to the mic and try again."
+  },
+  "tooShort": {
+    "ur": "ریکارڈنگ بہت چھوٹی تھی۔ تھوڑا تفصیل سے بتائیں کہ کیا مسئلہ ہے اور کہاں ہے۔",
+    "en": "That recording was too short. Please tell us a little more about the problem and where it is."
+  },
+  "micDenied": {
+    "ur": "مائیک کی اجازت نہیں ملی۔ فون کی سیٹنگ میں مائیک کی اجازت دیں، یا تصویر یا لکھ کر بتائیں۔",
+    "en": "We could not use the microphone. Allow it in your phone settings, or use a photo or text instead."
+  },
+  "notIssue": {
+    "ur": "یہ کسی علاقے کا مسئلہ نہیں لگتا۔ براہِ کرم بتائیں کہ آپ کے محلے میں کیا مسئلہ ہے۔",
+    "en": "This does not sound like a local problem. Please tell us what is wrong in your area."
+  },
+  "needLocation": {
+    "ur": "ہمیں جگہ معلوم نہیں ہو سکی۔ نقشے پر اس جگہ کو چھوئیں جہاں مسئلہ ہے۔",
+    "en": "We could not find the place. Please touch the spot on the map where the problem is."
+  },
+  "pinVerify": {
+    "ur": "کیا آپ نے بھی یہ مسئلہ دیکھا ہے؟ ہاں کے لیے انگوٹھا اوپر والا بٹن، نہیں کے لیے انگوٹھا نیچے والا بٹن دبائیں۔",
+    "en": "Have you seen this problem too? Press thumbs up for yes, or thumbs down for no."
+  },
+  "offlineQueued": {
+    "ur": "ابھی انٹرنیٹ نہیں ہے۔ آپ کی رپورٹ محفوظ ہے، انٹرنیٹ آتے ہی بھیج دی جائے گی۔",
+    "en": "There is no internet right now. Your report is saved and will be sent as soon as you are back online."
+  },
+  "tryAgain": {
+    "ur": "کچھ گڑبڑ ہو گئی۔ براہِ کرم دوبارہ کوشش کریں۔",
+    "en": "Something went wrong. Please try again."
+  }
+}

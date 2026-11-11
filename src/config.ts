@@ -4,8 +4,12 @@ const env = import.meta.env
 export const config = {
   supabaseUrl: env.VITE_SUPABASE_URL as string,
   supabaseAnonKey: env.VITE_SUPABASE_ANON_KEY as string,
-  mapsApiKey: (env.VITE_GOOGLE_MAPS_API_KEY as string) || '',
-  mapId: (env.VITE_GOOGLE_MAP_ID as string) || 'DEMO_MAP_ID',
+  /** Map tiles: Leaflet + OpenStreetMap (no key). Swap VITE_MAP_TILE_URL for another provider if traffic grows. */
+  tiles: {
+    url: (env.VITE_MAP_TILE_URL as string) || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: (env.VITE_MAP_TILE_ATTRIBUTION as string) ||
+      '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors',
+  },
   firebase: {
     apiKey: env.VITE_FIREBASE_API_KEY as string,
     authDomain: env.VITE_FIREBASE_AUTH_DOMAIN as string,

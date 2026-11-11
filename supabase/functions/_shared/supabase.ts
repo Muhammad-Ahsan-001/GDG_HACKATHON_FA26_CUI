@@ -5,8 +5,26 @@ import { HttpError } from './http.ts'
 export type { SupabaseClient, User }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
-const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
-const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+/** New-style keys (sb_publishable_/sb_secret_) are injected as JSON dicts; legacy JWT keys as plain vars. */
+function keyFromDict(name: string): string | undefined {
+  try {
+    const raw = Deno.env.get(name)
+    if (!raw) return undefined
+    const d = JSON.parse(raw) as Record<string, string>
+    return d.default ?? Object.values(d)[0]
+  } catch {
+    return undefined
+  }
+}
+const LEGACY_ANON = Deno.env.get('SUPABASE_ANON_KEY') || undefined
+const LEGACY_SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || undefined
+const PUBLISHABLE = keyFromDict('SUPABASE_PUBLISHABLE_KEYS')
+const SECRET = keyFromDict('SUPABASE_SECRET_KEYS')
+const ANON_KEY = (PUBLISHABLE ?? LEGACY_ANON)!
+const SERVICE_KEY = (SECRET ?? LEGACY_SERVICE)!
+const PUBLIC_KEYS = new Set([PUBLISHABLE, LEGACY_ANON].filter(Boolean) as string[])
+const SERVICE_KEYS = new Set([SECRET, LEGACY_SERVICE].filter(Boolean) as string[])
 
 let _admin: SupabaseClient | null = null
 
@@ -37,14 +55,14 @@ export function userClient(req: Request): SupabaseClient {
 /** True when the caller presented the service-role key (internal calls / scripts). */
 export function isServiceRequest(req: Request): boolean {
   const token = bearer(req)
-  const secret = Deno.env.get('SUPABASE_SECRET_KEY')
-  return Boolean(token && (token === SERVICE_KEY || (secret && token === secret)))
+  const apikey = req.headers.get('apikey')
+  return Boolean((token && SERVICE_KEYS.has(token)) || (apikey && SERVICE_KEYS.has(apikey) && !token?.includes('.')))
 }
 
 /** Resolve the calling user (anonymous users included) or throw 401. */
 export async function requireUser(req: Request): Promise<User> {
   const token = bearer(req)
-  if (!token || token === ANON_KEY) throw new HttpError(401, 'Sign in required', 'unauthorized')
+  if (!token || PUBLIC_KEYS.has(token) || !token.includes('.')) throw new HttpError(401, 'Sign in required', 'unauthorized')
   const { data, error } = await adminClient().auth.getUser(token)
   if (error || !data.user) throw new HttpError(401, 'Invalid or expired session', 'unauthorized')
   return data.user
